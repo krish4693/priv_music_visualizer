@@ -116,6 +116,30 @@ header {
   max-width: 360px;
 }
 
+  .renderer-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.renderer-mode-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted, #888);
+}
+
+#renderer-mode-select {
+  flex: 1;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  color: inherit;
+}
+
 .canvas-frame {
   border-radius: 8px;
   overflow: hidden;

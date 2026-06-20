@@ -1,0 +1,529 @@
+import * as THREE from 'three';
+import { createAudioSourceState, extractAudioSources, resetAudioSourceState } from '../audio/sources.js';
+import { resolveMappedValues, DEFAULT_MAPPINGS, VISUAL_TARGETS } from './mappingMatrix.js';
+import { DEFAULT_VARIATION } from './variationStore.js';
+import { DEFAULT_BG } from './backgroundStore.js';
+import { POP_ART_COLORS, resolvePalette } from './popArtPalette.js';
+import { SHAPE_PRESETS } from './shapePresets.js';
+import { geometryForShapeType, cinematicMaterial, UNIT } from './three/shapeFactory.js';
+import { CameraRig } from './three/cameraRig.js';
+import { createPostPipeline, resizePostPipeline, disposePostPipeline } from './three/postPipeline.js';
+
+const MIN_SHAPES = 8;
+const MAX_SHAPES = 28;
+const LETTERBOX = 0.075;
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function createRng(seed) {
+  let s = (Math.abs(Math.floor(seed)) || 1) >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+function curatedLayout(n, w, h, spread = 0.5, rng = Math.random) {
+  const cols = 5;
+  const rows = Math.ceil(n / cols);
+  const positions = [];
+  const jitterScale = 0.35 + spread * 1.65;
+  for (let i = 0; i < n; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const cx = ((col + 0.5) / cols) * w;
+    const cy = ((row + 0.5) / rows) * h;
+    const jitterX = (((i * 47) % 90 - 45) + (rng() - 0.5) * 40) * jitterScale;
+    const jitterY = (((i * 83) % 90 - 45) + (rng() - 0.5) * 40) * jitterScale;
+    positions.push({ x: cx + jitterX, y: cy + jitterY });
+  }
+  return positions;
+}
+
+function hexToThree(hex) {
+  const c = new THREE.Color(hex || DEFAULT_BG);
+  return c;
+}
+
+/** @param {{ r: number, g: number, b: number }[]} palette @param {number} idx */
+function paletteColorThree(palette, idx) {
+  const colors = resolvePalette(palette);
+  const n = colors.length;
+  const i = ((Math.floor(idx) % n) + n) % n;
+  const j = (i + 1) % n;
+  const blend = idx - Math.floor(idx);
+  const a = colors[i];
+  const b = colors[j];
+  return new THREE.Color(
+    (a.r + (b.r - a.r) * blend) / 255,
+    (a.g + (b.g - a.g) * blend) / 255,
+    (a.b + (b.b - a.b) * blend) / 255,
+  );
+}
+
+function screenToWorld(x, y, z, width, height) {
+  return {
+    x: (x / width - 0.5) * width * UNIT * 0.95,
+    y: -(y / height - 0.5) * height * UNIT * 0.95,
+    z: z * UNIT * 2.2,
+  };
+}
+
+/**
+ * WebGL cinematic scene — PBR shapes, bloom, fog, camera rig.
+ * Mirrors PopArtScene API for renderer.js compatibility.
+ */
+export class CinematicScene {
+  constructor(width = 1280, height = 720) {
+    this.width = width;
+    this.height = height;
+    this.mappings = { ...DEFAULT_MAPPINGS };
+    this.viscosity = 0.38;
+    this.variation = { ...DEFAULT_VARIATION, enabledShapes: [...DEFAULT_VARIATION.enabledShapes] };
+    this.rng = createRng(this.variation.seed);
+    this.sourceState = createAudioSourceState();
+    this.damped = { geometry: 0, color: 0, motion: 0, morphing: 0 };
+    this._prevFrameTime = null;
+    this.bgColor = DEFAULT_BG;
+    this.palette = [...POP_ART_COLORS];
+    this.colorOffset = 0;
+    this._beatFlash = 0;
+    this.shapes = [];
+    this.songTitle = '';
+    this.titleFrequency = 65;
+    this.liveAnalysis = null;
+    this._automationSample = null;
+    this._surpriseRush = 1;
+    this._sceneTime = 0;
+
+    this._initThree();
+    this.shapes = this._initShapes(width, height);
+    this._syncMeshes();
+  }
+
+  _initThree() {
+    this._threeScene = new THREE.Scene();
+    this._threeScene.fog = new THREE.FogExp2(hexToThree(this.bgColor), 0.048);
+
+    this._camera = new THREE.PerspectiveCamera(42, this.width / this.height, 0.1, 120);
+    this._cameraRig = new CameraRig(this._camera);
+
+    this._renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      preserveDrawingBuffer: true,
+    });
+    this._renderer.setSize(this.width, this.height, false);
+    this._renderer.setPixelRatio(1);
+    this._renderer.shadowMap.enabled = true;
+    this._renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this._renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this._renderer.toneMappingExposure = 1.08;
+    this._renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    this._shapeRoot = new THREE.Group();
+    this._threeScene.add(this._shapeRoot);
+
+    this._ambient = new THREE.AmbientLight(0x3a4466, 0.42);
+    this._keyLight = new THREE.DirectionalLight(0xfff0dd, 1.35);
+    this._keyLight.position.set(5.5, 9, 6);
+    this._keyLight.castShadow = true;
+    this._keyLight.shadow.mapSize.set(1024, 1024);
+    this._keyLight.shadow.camera.near = 1;
+    this._keyLight.shadow.camera.far = 40;
+    this._keyLight.shadow.camera.left = -12;
+    this._keyLight.shadow.camera.right = 12;
+    this._keyLight.shadow.camera.top = 12;
+    this._keyLight.shadow.camera.bottom = -12;
+
+    this._rimLight = new THREE.DirectionalLight(0x88bbff, 0.85);
+    this._rimLight.position.set(-6, 3, -8);
+
+    this._fillLight = new THREE.DirectionalLight(0xc8d4ff, 0.35);
+    this._fillLight.position.set(-4, -2, 5);
+
+    this._threeScene.add(this._ambient, this._keyLight, this._rimLight, this._fillLight);
+
+    const floorGeo = new THREE.PlaneGeometry(40, 40);
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0x0a0a12,
+      metalness: 0.65,
+      roughness: 0.82,
+    });
+    this._floor = new THREE.Mesh(floorGeo, floorMat);
+    this._floor.rotation.x = -Math.PI / 2;
+    this._floor.position.y = -2.8;
+    this._floor.receiveShadow = true;
+    this._threeScene.add(this._floor);
+
+    this._post = createPostPipeline(this._renderer, this._threeScene, this._camera, this.width, this.height);
+    this._applyBackgroundColor(this.bgColor);
+  }
+
+  _applyBackgroundColor(color) {
+    const c = hexToThree(color);
+    this._renderer.setClearColor(c, 1);
+    if (this._threeScene.fog) this._threeScene.fog.color.copy(c);
+  }
+
+  getRenderCanvas() {
+    return this._renderer.domElement;
+  }
+
+  setAutomationSample(sample) {
+    this._automationSample = sample;
+  }
+
+  getLiveAnalysisState() {
+    return this.liveAnalysis;
+  }
+
+  setSongTitle(text) {
+    this.songTitle = (text || '').trim().slice(0, 80);
+  }
+
+  setTitleFrequency(freq) {
+    this.titleFrequency = Math.min(100, Math.max(0, freq));
+  }
+
+  setPalette(palette) {
+    this.palette = palette?.length ? palette.map((c) => ({ ...c })) : [...POP_ART_COLORS];
+    this._updateMeshColors();
+  }
+
+  setMappings(mappings) {
+    this.mappings = mappings;
+  }
+
+  setViscosity(v) {
+    this.viscosity = Math.min(1, Math.max(0, v));
+  }
+
+  setBackgroundColor(color) {
+    this.bgColor = color || DEFAULT_BG;
+    this._applyBackgroundColor(this.bgColor);
+  }
+
+  setVariation(settings) {
+    const prevEnabled = [...(this.variation.enabledShapes ?? [])].sort().join(',');
+    this.variation = {
+      ...settings,
+      enabledShapes: settings.enabledShapes?.length ? [...settings.enabledShapes] : ['cube'],
+      shapeCount: Math.min(MAX_SHAPES, Math.max(MIN_SHAPES, settings.shapeCount ?? DEFAULT_VARIATION.shapeCount)),
+    };
+    this.rng = createRng(this.variation.seed);
+    const nextEnabled = [...this.variation.enabledShapes].sort().join(',');
+    if (prevEnabled !== nextEnabled) {
+      this.regenerate();
+    }
+  }
+
+  resetPlayhead() {
+    this._prevFrameTime = null;
+    resetAudioSourceState(this.sourceState);
+    this.damped = { geometry: 0, color: 0, motion: 0, morphing: 0 };
+  }
+
+  regenerate() {
+    this._clearMeshes();
+    this.rng = createRng(this.variation.seed);
+    this.shapes = this._initShapes(this.width, this.height);
+    this.colorOffset = 0;
+    this._surpriseRush = 1;
+    this._syncMeshes();
+  }
+
+  reset(width = this.width, height = this.height) {
+    this.width = width;
+    this.height = height;
+    this._prevFrameTime = null;
+    resetAudioSourceState(this.sourceState);
+    this.damped = { geometry: 0, color: 0, motion: 0, morphing: 0 };
+    this.colorOffset = 0;
+    this._surpriseRush = 1;
+    this.rng = createRng(this.variation.seed);
+    this._resizeThree(width, height);
+    this._clearMeshes();
+    this.shapes = this._initShapes(width, height);
+    this._syncMeshes();
+  }
+
+  _resizeThree(width, height) {
+    this._camera.aspect = width / height;
+    this._camera.updateProjectionMatrix();
+    this._renderer.setSize(width, height, false);
+    resizePostPipeline(this._post, width, height);
+  }
+
+  _enabledShapeIds() {
+    const enabled = this.variation.enabledShapes.filter((id) => SHAPE_PRESETS[id]);
+    return enabled.length ? enabled : ['cube'];
+  }
+
+  _pickNextType(current, rng = this.rng) {
+    const options = this._enabledShapeIds().filter((t) => t !== current);
+    if (!options.length) return current;
+    return options[Math.floor(rng() * options.length)];
+  }
+
+  _initShapes(width, height) {
+    const rng = this.rng;
+    const count = Math.min(MAX_SHAPES, Math.max(MIN_SHAPES, this.variation.shapeCount));
+    const spread = this.variation.layoutSpread / 100;
+    const sizeSpread = this.variation.sizeSpread / 100;
+    const spin = this.variation.spinIntensity / 100;
+    const depth = this.variation.depthRange / 100;
+    const enabled = this._enabledShapeIds();
+    const positions = curatedLayout(count, width, height, spread, rng);
+
+    return positions.map((pos, i) => {
+      const type = enabled[Math.floor(rng() * enabled.length)];
+      const morphTarget = this._pickNextType(type, rng);
+      const sizeMul = 1 + (rng() - 0.5) * sizeSpread * 0.55;
+      const zRange = 80 + depth * 200;
+      const spinMul = 0.35 + spin * 0.85;
+      const z = (rng() - 0.5) * zRange * 2;
+
+      return {
+        x: pos.x,
+        y: pos.y,
+        z,
+        homeX: pos.x,
+        homeY: pos.y,
+        homeZ: z,
+        vx: (rng() - 0.5) * 0.3,
+        vy: (rng() - 0.5) * 0.3,
+        vz: (rng() - 0.5) * 0.16 * (0.5 + depth),
+        rotX: rng() * Math.PI * 2,
+        rotY: rng() * Math.PI * 2,
+        rotZ: rng() * Math.PI * 2,
+        rotSpeedX: (rng() - 0.5) * 0.76 * spinMul,
+        rotSpeedY: (rng() - 0.5) * 0.64 * spinMul,
+        rotSpeedZ: (rng() - 0.5) * 0.84 * spinMul,
+        type,
+        morphTarget,
+        morphT: rng() * 0.4,
+        sizeMul,
+        scale: 1,
+        targetScale: 1,
+        colorIdx: i % this.palette.length,
+        surpriseSpinBoost: 1,
+        surpriseScale: 1,
+      };
+    });
+  }
+
+  _clearMeshes() {
+    for (const child of [...this._shapeRoot.children]) {
+      child.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry?.dispose();
+          if (obj.material instanceof THREE.Material) obj.material.dispose();
+        }
+      });
+      this._shapeRoot.remove(child);
+    }
+    this._meshByShape = new Map();
+  }
+
+  _syncMeshes() {
+    this._meshByShape = new Map();
+    for (let i = 0; i < this.shapes.length; i++) {
+      const s = this.shapes[i];
+      const color = paletteColorThree(this.palette, s.colorIdx + this.colorOffset);
+      const geo = geometryForShapeType(s.type, s.sizeMul);
+      const mat = cinematicMaterial(color);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this._shapeRoot.add(mesh);
+      this._meshByShape.set(s, mesh);
+    }
+    this._applyShapeTransforms();
+  }
+
+  _updateMeshColors() {
+    for (const s of this.shapes) {
+      const mesh = this._meshByShape.get(s);
+      if (!mesh?.material) continue;
+      const color = paletteColorThree(this.palette, s.colorIdx + this.colorOffset);
+      mesh.material.color.copy(color);
+      mesh.material.emissive.copy(color).multiplyScalar(0.12);
+    }
+  }
+
+  _applyShapeTransforms() {
+    for (const s of this.shapes) {
+      const mesh = this._meshByShape.get(s);
+      if (!mesh) continue;
+      const w = screenToWorld(s.x, s.y, s.z, this.width, this.height);
+      mesh.position.set(w.x, w.y, w.z);
+      mesh.rotation.set(s.rotX, s.rotY, s.rotZ);
+      const sc = s.scale * (s.surpriseScale ?? 1);
+      mesh.scale.set(sc, sc, sc);
+    }
+  }
+
+  _updateColorVariation(sources, frame, dt) {
+    const shift = this.variation.colorShift / 100;
+    const mode = this.variation.colorMode;
+    if (mode === 'manual') return;
+
+    if (mode === 'tempo') {
+      const phase = sources.tempoPhase ?? 0;
+      this.colorOffset = lerp(this.colorOffset, phase * shift * this.palette.length * 0.35, 0.04);
+    } else if (mode === 'energy') {
+      const amp = sources.amplitude ?? 0;
+      const pulse = frame.beatPulse ?? 0;
+      if (frame.beat) this._beatFlash = 1;
+      this._beatFlash = Math.max(0, this._beatFlash - dt * 3.5);
+      const target = amp * shift * 0.4 + this._beatFlash * shift * 0.6 + pulse * shift * 0.25;
+      this.colorOffset = lerp(this.colorOffset, target * this.palette.length, 0.06);
+    }
+    this._updateMeshColors();
+  }
+
+  _snapshotLiveAnalysis(sources, raw, frame, geo, mot, morph) {
+    const snapSources = this._automationSample?.sources ?? sources;
+    let colorDrive = this.damped.color;
+    if (this._automationSample?.effective) {
+      colorDrive = this._automationSample.effective.color;
+    }
+    const sourceInputs = {};
+    for (const { id } of VISUAL_TARGETS) {
+      const entry = this.mappings[id] ?? DEFAULT_MAPPINGS[id];
+      const src = entry?.source ?? 'none';
+      sourceInputs[id] = src === 'none' ? null : (snapSources[src] ?? 0);
+    }
+    this.liveAnalysis = {
+      sources: { ...snapSources },
+      mapped: { ...raw },
+      damped: { ...this.damped },
+      sourceInputs,
+      effective: { geometry: geo, color: colorDrive, motion: mot, morphing: morph },
+      flags: {
+        manualMotion: !!this.variation.manualSpeed,
+        manualColor: this.variation.colorMode === 'manual',
+        colorFromMode: this.variation.colorMode !== 'manual',
+      },
+    };
+  }
+
+  update(frame) {
+    let dt = 1 / 30;
+    if (frame.time != null) {
+      if (this._prevFrameTime != null) dt = Math.max(1 / 120, Math.min(0.1, frame.time - this._prevFrameTime));
+      this._prevFrameTime = frame.time;
+      this._sceneTime = frame.time;
+    }
+
+    const sources = extractAudioSources(frame, this.sourceState, dt);
+    const raw = resolveMappedValues(sources, this.mappings);
+    const visc = this.viscosity;
+    const dampRate = 0.028 + (1 - visc) * 0.065;
+
+    for (const key of Object.keys(this.damped)) {
+      this.damped[key] = lerp(this.damped[key], raw[key] ?? 0, dampRate);
+    }
+
+    if (this._automationSample?.effective) {
+      const e = this._automationSample.effective;
+      this.damped.geometry = e.geometry;
+      this.damped.color = e.color;
+      this.damped.motion = e.motion;
+      this.damped.morphing = e.morphing;
+      if (this.variation.colorMode !== 'manual') {
+        const target = e.color * this.palette.length;
+        this.colorOffset = lerp(this.colorOffset, target, 0.12);
+        this._updateMeshColors();
+      }
+    } else {
+      this._updateColorVariation(sources, frame, dt);
+    }
+
+    const geo = this.damped.geometry;
+    let mot = this.damped.motion;
+    let morph = this.damped.morphing;
+    const depth = this.variation.depthRange / 100;
+
+    if (this.variation.manualSpeed) {
+      mot = this.variation.manualSpeedValue / 100;
+      morph = mot * 0.8;
+    }
+    mot *= this._surpriseRush;
+
+    const drag = 0.978 + visc * 0.018;
+    const driftSpeed = 16 + (1 - visc) * 62 + mot * 78;
+    const spinMul = 0.35 + (this.variation.spinIntensity / 100) * 0.85;
+    const rotRate = (0.24 + mot * 0.72) * spinMul;
+    const breathe = 1 + geo * 0.22;
+    const zLimit = 180 + depth * 140;
+    const fixedLayout = this.variation.fixedLayout !== false;
+
+    for (const s of this.shapes) {
+      s.targetScale = breathe + Math.sin(s.rotY * 0.5) * geo * 0.06;
+      s.scale = lerp(s.scale, s.targetScale, 0.055);
+
+      if (fixedLayout) {
+        s.vx = 0;
+        s.vy = 0;
+        s.vz = 0;
+        s.x = s.homeX;
+        s.y = s.homeY;
+        s.z = s.homeZ;
+      } else {
+        const angle = s.rotY + mot * 0.9;
+        s.vx += Math.cos(angle) * mot * 0.012;
+        s.vy += Math.sin(angle * 0.7) * mot * 0.012;
+        s.vz += Math.sin(angle * 0.5) * mot * 0.008 * (0.6 + depth * 0.6);
+        s.vx *= drag;
+        s.vy *= drag;
+        s.vz *= drag;
+        s.x += s.vx * driftSpeed * dt;
+        s.y += s.vy * driftSpeed * dt;
+        s.z += s.vz * driftSpeed * dt * 0.85;
+
+        const pad = 220;
+        if (s.x < -pad) s.x = this.width + pad;
+        if (s.x > this.width + pad) s.x = -pad;
+        if (s.y < -pad) s.y = this.height + pad;
+        if (s.y > this.height + pad) s.y = -pad;
+        if (s.z > zLimit) s.z = -zLimit;
+        if (s.z < -zLimit) s.z = zLimit;
+      }
+
+      s.rotX += s.rotSpeedX * rotRate * dt * (s.surpriseSpinBoost ?? 1);
+      s.rotY += s.rotSpeedY * rotRate * dt * (s.surpriseSpinBoost ?? 1);
+      s.rotZ += s.rotSpeedZ * rotRate * dt * (s.surpriseSpinBoost ?? 1);
+      s.morphT = Math.min(1, s.morphT + (0.015 + morph * 0.07) * dt);
+    }
+
+    this._cameraRig.update(this._sceneTime, mot);
+    this._applyShapeTransforms();
+    this._snapshotLiveAnalysis(sources, raw, frame, geo, mot, morph);
+  }
+
+  _drawLetterbox(ctx) {
+    const bar = Math.round(this.height * LETTERBOX);
+    if (bar < 2) return;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, this.width, bar);
+    ctx.fillRect(0, this.height - bar, this.width, bar);
+  }
+
+  draw(ctx) {
+    this._post.composer.render();
+    ctx.drawImage(this._renderer.domElement, 0, 0, this.width, this.height);
+    this._drawLetterbox(ctx);
+  }
+
+  dispose() {
+    this._clearMeshes();
+    disposePostPipeline(this._post);
+    this._floor.geometry.dispose();
+    this._floor.material.dispose();
+    this._renderer.dispose();
+  }
+}

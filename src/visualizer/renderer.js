@@ -1,13 +1,17 @@
 import { PopArtScene } from './popArtScene.js';
+import { CinematicScene } from './cinematicScene.js';
 import { loadMappingMatrix, cloneMappings, loadViscosity } from './mappingMatrix.js';
 import { loadVariation, cloneVariation } from './variationStore.js';
 import { loadBackgroundColor, DEFAULT_BG } from './backgroundStore.js';
 import { loadSongTitle, loadTitleFrequency } from './titleStore.js';
+import { loadRendererMode, saveRendererMode, RENDERER_MODES } from './rendererModeStore.js';
 
 const WIDTH = 1280;
 const HEIGHT = 720;
 
 let scene = null;
+/** @type {'popart'|'cinematic'} */
+let rendererMode = loadRendererMode();
 let currentMappings = loadMappingMatrix();
 let currentViscosity = loadViscosity();
 let currentVariation = loadVariation();
@@ -15,6 +19,17 @@ let currentPalette = null;
 let currentBackground = loadBackgroundColor();
 let currentSongTitle = loadSongTitle();
 let currentTitleFrequency = loadTitleFrequency();
+
+function createScene(width, height) {
+  return rendererMode === 'cinematic'
+    ? new CinematicScene(width, height)
+    : new PopArtScene(width, height);
+}
+
+function disposeScene() {
+  scene?.dispose?.();
+  scene = null;
+}
 
 function applySceneSettings() {
   if (!scene) return;
@@ -26,6 +41,21 @@ function applySceneSettings() {
   scene.setSongTitle(currentSongTitle);
   scene.setTitleFrequency(currentTitleFrequency);
   if (!scene.shapes.length) scene.regenerate();
+}
+
+export { RENDERER_MODES };
+
+export function getRendererMode() {
+  return rendererMode;
+}
+
+/** @param {'popart'|'cinematic'} mode */
+export function setRendererMode(mode) {
+  if (mode !== 'popart' && mode !== 'cinematic') return;
+  if (rendererMode === mode) return;
+  rendererMode = mode;
+  saveRendererMode(mode);
+  disposeScene();
 }
 
 export function setVisualizerImage(_img) {}
@@ -109,7 +139,8 @@ export function getViscosity() {
 }
 
 export function resetRenderer(width = WIDTH, height = HEIGHT) {
-  scene = new PopArtScene(width, height);
+  disposeScene();
+  scene = createScene(width, height);
   applySceneSettings();
 }
 
@@ -127,7 +158,7 @@ export function clearAutomationSample() {
 
 export function drawFrame(ctx, frame, _title = '') {
   if (!scene) {
-    scene = new PopArtScene(ctx.canvas.width || WIDTH, ctx.canvas.height || HEIGHT);
+    scene = createScene(ctx.canvas.width || WIDTH, ctx.canvas.height || HEIGHT);
     applySceneSettings();
   }
   scene.update(frame);
@@ -136,6 +167,10 @@ export function drawFrame(ctx, frame, _title = '') {
 
 export function getCanvasSize() {
   return { width: WIDTH, height: HEIGHT };
+}
+
+export function getRenderCanvas() {
+  return scene?.getRenderCanvas?.() ?? null;
 }
 
 export function drawBackdrop(ctx) {

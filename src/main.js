@@ -15,6 +15,9 @@ import {
   setBackgroundColor,
   setSongTitle,
   setTitleFrequency,
+  getRendererMode,
+  setRendererMode,
+  RENDERER_MODES,
 } from './visualizer/renderer.js';
 import {
   AUDIO_SOURCES,
@@ -135,6 +138,7 @@ const kantenToggle = document.getElementById('kanten-toggle');
 const cornerRoundSlider = document.getElementById('corner-round-slider');
 const cornerRoundVal = document.getElementById('corner-round-val');
 const variationResetBtn = document.getElementById('variation-reset');
+const rendererModeSelect = document.getElementById('renderer-mode-select');
 
 const ctx = canvas.getContext('2d');
 
@@ -183,6 +187,7 @@ playBtn.addEventListener('click', togglePlay);
 stopBtn.addEventListener('click', stopPlayback);
 setupPlayheadControl();
 setupAutomationControls();
+setupRendererMode();
 exportBtn.addEventListener('click', handleExport);
 
 mappingPanel = setupMappingPanel();
@@ -552,6 +557,29 @@ function restartPlaybackAtOffset() {
 function setupPlayheadControl() {
   playheadSlider?.addEventListener('input', () => {
     seekToTime(Number(playheadSlider.value));
+  });
+}
+
+function updateExportButtonLabel() {
+  if (!exportBtn) return;
+  const mode = getRendererMode();
+  exportBtn.textContent = mode === 'cinematic'
+    ? 'Export MP4 (720p · Cinematic)'
+    : 'Export MP4 (720p · Pop Art)';
+}
+
+function setupRendererMode() {
+  if (!rendererModeSelect) return;
+  rendererModeSelect.value = getRendererMode();
+  updateExportButtonLabel();
+
+  rendererModeSelect.addEventListener('change', () => {
+    const mode = rendererModeSelect.value;
+    if (mode !== 'popart' && mode !== 'cinematic') return;
+    setRendererMode(mode);
+    resetRenderer(canvas.width, canvas.height);
+    updateExportButtonLabel();
+    refreshPreview();
   });
 }
 

@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",
-    "@ffmpeg/util": "^0.12.2"
+    "@ffmpeg/util": "^0.12.2",
+    "three": "^0.184.0"
   },
   "devDependencies": {
     "vite": "^6.3.5"

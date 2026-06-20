@@ -136,6 +136,13 @@
         <!-- CENTER: video -->
         <main class="panel panel-center">
           <section class="canvas-section">
+            <div class="renderer-mode-row">
+              <label class="renderer-mode-label" for="renderer-mode-select">Renderer</label>
+              <select id="renderer-mode-select" aria-label="Visualization renderer">
+                <option value="popart">Pop Art (Classic)</option>
+                <option value="cinematic">Cinematic (WebGL)</option>
+              </select>
+            </div>
             <div class="canvas-frame">
               <canvas id="visualizer" width="1280" height="720"></canvas>
             </div>
