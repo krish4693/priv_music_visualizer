@@ -63,24 +63,26 @@ export function geometryForShapeType(typeId, sizeMul = 1) {
 
 /** @param {THREE.Color} color @param {{ metalness?: number, roughness?: number, emissive?: number }} [opts] */
 export function cinematicMaterial(color, opts = {}) {
-  const metalness = (opts.metalness ?? 18) / 100;
-  const roughness = (opts.roughness ?? 16) / 100;
-  const emissiveAmt = (opts.emissive ?? 16) / 100;
+  const metalness = ((opts.metalness ?? 18) / 100) * 0.22;
+  const roughness = Math.max(0.62, (opts.roughness ?? 16) / 100);
+  const emissiveIntensity = 0.58 + ((opts.emissive ?? 16) / 100) * 0.42;
   return new THREE.MeshStandardMaterial({
-    color,
-    metalness: metalness * 0.65,
+    color: color.clone().multiplyScalar(0.2),
+    metalness,
     roughness,
-    emissive: color.clone().multiplyScalar(emissiveAmt * 0.28),
-    envMapIntensity: 0.35,
+    emissive: color.clone(),
+    emissiveIntensity,
+    envMapIntensity: 0.1,
   });
 }
 
 /** @param {THREE.MeshStandardMaterial} mat @param {THREE.Color} color @param {{ metalness?: number, roughness?: number, emissive?: number }} opts */
 export function updateCinematicMaterial(mat, color, opts = {}) {
-  mat.color.copy(color);
-  mat.metalness = ((opts.metalness ?? 18) / 100) * 0.65;
-  mat.roughness = (opts.roughness ?? 16) / 100;
-  mat.emissive.copy(color).multiplyScalar(((opts.emissive ?? 16) / 100) * 0.28);
+  mat.color.copy(color).multiplyScalar(0.2);
+  mat.metalness = ((opts.metalness ?? 18) / 100) * 0.22;
+  mat.roughness = Math.max(0.62, (opts.roughness ?? 16) / 100);
+  mat.emissive.copy(color);
+  mat.emissiveIntensity = 0.58 + ((opts.emissive ?? 16) / 100) * 0.42;
 }
 
 export { UNIT };

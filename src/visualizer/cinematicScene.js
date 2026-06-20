@@ -51,11 +51,15 @@ function hexToThree(hex) {
   return c;
 }
 
-/** @param {{ r: number, g: number, b: number }[]} palette @param {number} idx */
-function paletteColorThree(palette, idx) {
+/** @param {{ r: number, g: number, b: number }[]} palette @param {number} idx @param {boolean} [snap=false] */
+function paletteColorThree(palette, idx, snap = false) {
   const colors = resolvePalette(palette);
   const n = colors.length;
   const i = ((Math.floor(idx) % n) + n) % n;
+  if (snap) {
+    const c = colors[i];
+    return new THREE.Color(c.r / 255, c.g / 255, c.b / 255);
+  }
   const j = (i + 1) % n;
   const blend = idx - Math.floor(idx);
   const a = colors[i];
@@ -231,10 +235,11 @@ export class CinematicScene {
 
   _updateMeshMaterials() {
     const opts = this._materialOpts();
+    const snapColors = this.variation.colorMode === 'manual';
     for (const s of this.shapes) {
       const mesh = this._meshByShape.get(s);
       if (!mesh?.material) continue;
-      const color = paletteColorThree(this.palette, s.colorIdx + this.colorOffset);
+      const color = paletteColorThree(this.palette, s.colorIdx + this.colorOffset, snapColors);
       updateCinematicMaterial(mesh.material, color, opts);
     }
   }
