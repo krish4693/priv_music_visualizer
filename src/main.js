@@ -3,9 +3,15 @@ import {
   drawFrame,
   drawBackdrop,
   resetRenderer,
+  resetPlayhead,
   setMappingMatrix,
   setViscosity,
   setVisualizerPalette,
+  setVariationSettings,
+  regenerateVariation,
+  setBackgroundColor,
+  setSongTitle,
+  setTitleFrequency,
 } from './visualizer/renderer.js';
 import {
   AUDIO_SOURCES,
@@ -30,6 +36,17 @@ import {
   hexToRgb,
   colorKey,
 } from './visualizer/paletteStore.js';
+import {
+  SHAPE_OPTIONS,
+  COLOR_MODES,
+  DEFAULT_VARIATION,
+  loadVariation,
+  saveVariation,
+  cloneVariation,
+  randomizeVariationSeed,
+} from './visualizer/variationStore.js';
+import { loadBackgroundColor, saveBackgroundColor } from './visualizer/backgroundStore.js';
+import { loadSongTitle, saveSongTitle, titleFromFilename, loadTitleFrequency, saveTitleFrequency } from './visualizer/titleStore.js';
 
 const BUNDLED_AUDIO_URL = '/samples/aboud-vs-flab.wav';
 const BUNDLED_AUDIO_NAME = '02 AboudVsFlab.wav';
@@ -37,6 +54,9 @@ const BUNDLED_AUDIO_NAME = '02 AboudVsFlab.wav';
 const fileInput = document.getElementById('file-input');
 const dropzone = document.getElementById('dropzone');
 const fileNameEl = document.getElementById('file-name');
+const songTitleInput = document.getElementById('song-title-input');
+const titleFrequencySlider = document.getElementById('title-frequency-slider');
+const titleFrequencyVal = document.getElementById('title-frequency-val');
 const canvas = document.getElementById('visualizer');
 const playBtn = document.getElementById('play-btn');
 const stopBtn = document.getElementById('stop-btn');
@@ -57,6 +77,36 @@ const viscosityVal = document.getElementById('viscosity-val');
 const paletteSwatches = document.getElementById('palette-swatches');
 const colorPicker = document.getElementById('color-picker');
 const addColorBtn = document.getElementById('add-color-btn');
+const bgColorPicker = document.getElementById('bg-color-picker');
+const variationSeedInput = document.getElementById('variation-seed');
+const variationNewBtn = document.getElementById('variation-new-btn');
+const shapeToggles = document.getElementById('shape-toggles');
+const colorModeSelect = document.getElementById('color-mode-select');
+const colorShiftSlider = document.getElementById('color-shift-slider');
+const colorShiftVal = document.getElementById('color-shift-val');
+const shapeCountSlider = document.getElementById('shape-count-slider');
+const shapeCountVal = document.getElementById('shape-count-val');
+const sizeSpreadSlider = document.getElementById('size-spread-slider');
+const sizeSpreadVal = document.getElementById('size-spread-val');
+const spinIntensitySlider = document.getElementById('spin-intensity-slider');
+const spinIntensityVal = document.getElementById('spin-intensity-val');
+const layoutSpreadSlider = document.getElementById('layout-spread-slider');
+const layoutSpreadVal = document.getElementById('layout-spread-val');
+const depthRangeSlider = document.getElementById('depth-range-slider');
+const depthRangeVal = document.getElementById('depth-range-val');
+const manualSpeedCheck = document.getElementById('manual-speed-check');
+const manualSpeedSlider = document.getElementById('manual-speed-slider');
+const manualSpeedVal = document.getElementById('manual-speed-val');
+const surprisesCheck = document.getElementById('surprises-check');
+const surpriseRateSlider = document.getElementById('surprise-rate-slider');
+const surpriseRateVal = document.getElementById('surprise-rate-val');
+const roundedEdgesCheck = document.getElementById('rounded-edges-check');
+const roundedEdgesToggle = document.getElementById('rounded-edges-toggle');
+const kantenCheck = document.getElementById('kanten-check');
+const kantenToggle = document.getElementById('kanten-toggle');
+const cornerRoundSlider = document.getElementById('corner-round-slider');
+const cornerRoundVal = document.getElementById('corner-round-val');
+const variationResetBtn = document.getElementById('variation-reset');
 
 const ctx = canvas.getContext('2d');
 
@@ -91,7 +141,7 @@ function isAcceptedAudioFile(file) {
 }
 
 function silentFrame() {
-  return { rms: 0, bass: 0, mid: 0, high: 0, bars: new Float32Array(48), beat: false, beatPulse: 0, tempo: 0.5, pitch: 0.5 };
+  return { rms: 0, bass: 0, mid: 0, high: 0, bars: new Float32Array(48), beat: false, beatPulse: 0, tempo: 0.5, pitch: 0.5, time: 0 };
 }
 
 setupDropzone();
@@ -102,9 +152,19 @@ exportBtn.addEventListener('click', handleExport);
 
 setupMappingPanel();
 setupPaletteControls();
+setupBackgroundControl();
+setupSongTitleControl();
+setupVariationPanel();
 applyActivePalette();
+setBackgroundColor(loadBackgroundColor());
+setSongTitle(loadSongTitle());
+setTitleFrequency(loadTitleFrequency());
+songTitleInput.value = loadSongTitle();
+titleFrequencySlider.value = String(loadTitleFrequency());
+titleFrequencyVal.textContent = `${loadTitleFrequency()}%`;
 setMappingMatrix(loadMappingMatrix());
 setViscosity(loadViscosity());
+setVariationSettings(loadVariation());
 viscositySlider.value = String(Math.round(loadViscosity() * 100));
 viscosityVal.textContent = `${viscositySlider.value}%`;
 
@@ -173,6 +233,15 @@ async function processAudioFile(file, persist, displayName) {
     audioFile = file;
     fileNameEl.textContent = displayName ?? (persist ? file.name : `${file.name} (saved)`);
 
+    if (!songTitleInput.value.trim()) {
+      const suggested = titleFromFilename(file.name);
+      if (suggested) {
+        songTitleInput.value = suggested;
+        saveSongTitle(suggested);
+        setSongTitle(suggested);
+      }
+    }
+
     const onUploadProgress = (pct, label) => setUploadProgress(pct, label);
 
     if (persist) await saveAudio(file);
@@ -200,6 +269,12 @@ async function processAudioFile(file, persist, displayName) {
   }
 }
 
+function refreshPreview() {
+  if (!audioBuffer || isPlaying) return;
+  drawBackdrop(ctx);
+  drawIdleFrame();
+}
+
 function setupMappingPanel() {
   let mappings = loadMappingMatrix();
   let viscosity = loadViscosity();
@@ -207,12 +282,13 @@ function setupMappingPanel() {
   function applyMappings() {
     saveMappingMatrix(mappings);
     setMappingMatrix(mappings);
-    if (audioBuffer && !isPlaying) drawIdleFrame();
+    refreshPreview();
   }
 
   function applyViscosity() {
     saveViscosity(viscosity);
     setViscosity(viscosity);
+    refreshPreview();
   }
 
   viscositySlider.addEventListener('input', () => {
@@ -284,7 +360,7 @@ function getCustomColors() {
 function applyActivePalette() {
   const active = getActivePalette(fullPalette, selectedPaletteIndices);
   setVisualizerPalette(active);
-  if (audioBuffer && !isPlaying) drawIdleFrame();
+  refreshPreview();
 }
 
 function renderPaletteSwatches() {
@@ -336,12 +412,219 @@ function setupPaletteControls() {
   });
 }
 
+function setupBackgroundControl() {
+  bgColorPicker.value = loadBackgroundColor();
+  bgColorPicker.addEventListener('input', () => {
+    saveBackgroundColor(bgColorPicker.value);
+    setBackgroundColor(bgColorPicker.value);
+    if (audioBuffer) {
+      refreshPreview();
+    } else {
+      drawBackdrop(ctx);
+      drawFrame(ctx, silentFrame());
+    }
+  });
+}
+
+function setupSongTitleControl() {
+  songTitleInput.addEventListener('input', () => {
+    saveSongTitle(songTitleInput.value);
+    setSongTitle(songTitleInput.value);
+    refreshPreview();
+  });
+
+  titleFrequencySlider.addEventListener('input', () => {
+    const val = Number(titleFrequencySlider.value);
+    titleFrequencyVal.textContent = `${val}%`;
+    saveTitleFrequency(val);
+    setTitleFrequency(val);
+    refreshPreview();
+  });
+}
+
+function setupVariationPanel() {
+  let variation = loadVariation();
+  let regenerateOnNextApply = false;
+
+  function syncSliderLabels() {
+    colorShiftVal.textContent = `${variation.colorShift}%`;
+    shapeCountVal.textContent = String(variation.shapeCount);
+    sizeSpreadVal.textContent = `${variation.sizeSpread}%`;
+    spinIntensityVal.textContent = `${variation.spinIntensity}%`;
+    layoutSpreadVal.textContent = `${variation.layoutSpread}%`;
+    depthRangeVal.textContent = `${variation.depthRange}%`;
+    manualSpeedVal.textContent = `${variation.manualSpeedValue}%`;
+    surpriseRateVal.textContent = `${variation.surpriseRate}%`;
+    cornerRoundVal.textContent = `${variation.cornerRound}%`;
+    colorShiftSlider.disabled = variation.colorMode === 'manual';
+    manualSpeedSlider.disabled = !variation.manualSpeed;
+    surpriseRateSlider.disabled = !variation.surprises;
+    cornerRoundSlider.disabled = !variation.roundedEdges;
+  }
+
+  function renderShapeToggles() {
+    shapeToggles.innerHTML = SHAPE_OPTIONS.map(({ id, label }) => {
+      const on = variation.enabledShapes.includes(id);
+      return `<label class="shape-toggle${on ? ' active' : ''}">
+        <input type="checkbox" data-shape="${id}"${on ? ' checked' : ''} />
+        <span>${label}</span>
+      </label>`;
+    }).join('');
+
+    shapeToggles.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const id = cb.dataset.shape;
+        if (cb.checked) {
+          if (!variation.enabledShapes.includes(id)) variation.enabledShapes.push(id);
+        } else if (variation.enabledShapes.length > 1) {
+          variation.enabledShapes = variation.enabledShapes.filter((s) => s !== id);
+        } else {
+          cb.checked = true;
+          return;
+        }
+        applyVariation(true);
+        renderShapeToggles();
+      });
+    });
+  }
+
+  function renderColorModeSelect() {
+    colorModeSelect.innerHTML = COLOR_MODES.map(({ id, label }) =>
+      `<option value="${id}"${variation.colorMode === id ? ' selected' : ''}>${label}</option>`,
+    ).join('');
+  }
+
+  function applyVariation(forceRegenerate = regenerateOnNextApply) {
+    saveVariation(variation);
+    setVariationSettings(variation);
+    if (forceRegenerate) {
+      regenerateVariation();
+      regenerateOnNextApply = false;
+    }
+    syncSliderLabels();
+    refreshPreview();
+  }
+
+  function bindSlider(slider, key, suffix = '%', needsRegenerate = false) {
+    slider.addEventListener('input', () => {
+      variation[key] = Number(slider.value);
+      const valEl = document.getElementById(`${slider.id.replace('-slider', '-val')}`);
+      if (valEl) valEl.textContent = suffix === '' ? String(variation[key]) : `${variation[key]}${suffix}`;
+      applyVariation(needsRegenerate);
+    });
+  }
+
+  variationSeedInput.value = String(variation.seed);
+  colorShiftSlider.value = String(variation.colorShift);
+  shapeCountSlider.value = String(variation.shapeCount);
+  sizeSpreadSlider.value = String(variation.sizeSpread);
+  spinIntensitySlider.value = String(variation.spinIntensity);
+  layoutSpreadSlider.value = String(variation.layoutSpread);
+  depthRangeSlider.value = String(variation.depthRange);
+  manualSpeedCheck.checked = variation.manualSpeed;
+  manualSpeedSlider.value = String(variation.manualSpeedValue);
+  surprisesCheck.checked = variation.surprises;
+  surpriseRateSlider.value = String(variation.surpriseRate);
+  roundedEdgesCheck.checked = variation.roundedEdges;
+  roundedEdgesToggle?.classList.toggle('active', variation.roundedEdges);
+  kantenCheck.checked = variation.kanten;
+  kantenToggle?.classList.toggle('active', variation.kanten);
+  cornerRoundSlider.value = String(variation.cornerRound);
+  renderColorModeSelect();
+  renderShapeToggles();
+  syncSliderLabels();
+
+  variationSeedInput.addEventListener('change', () => {
+    const v = Math.max(1, Math.min(99999, Math.floor(Number(variationSeedInput.value) || variation.seed)));
+    variation.seed = v;
+    variationSeedInput.value = String(v);
+    regenerateOnNextApply = true;
+    applyVariation(true);
+  });
+
+  variationNewBtn.addEventListener('click', () => {
+    variation = randomizeVariationSeed(variation);
+    variationSeedInput.value = String(variation.seed);
+    regenerateOnNextApply = true;
+    applyVariation(true);
+  });
+
+  colorModeSelect.addEventListener('change', () => {
+    variation.colorMode = colorModeSelect.value;
+    applyVariation(false);
+    syncSliderLabels();
+  });
+
+  bindSlider(colorShiftSlider, 'colorShift', '%', false);
+  bindSlider(shapeCountSlider, 'shapeCount', '', true);
+  bindSlider(sizeSpreadSlider, 'sizeSpread', '%', true);
+  bindSlider(spinIntensitySlider, 'spinIntensity', '%', false);
+  bindSlider(layoutSpreadSlider, 'layoutSpread', '%', true);
+  bindSlider(depthRangeSlider, 'depthRange', '%', true);
+  bindSlider(manualSpeedSlider, 'manualSpeedValue', '%', false);
+
+  manualSpeedCheck.addEventListener('change', () => {
+    variation.manualSpeed = manualSpeedCheck.checked;
+    applyVariation(false);
+    syncSliderLabels();
+  });
+
+  surprisesCheck.addEventListener('change', () => {
+    variation.surprises = surprisesCheck.checked;
+    applyVariation(false);
+    syncSliderLabels();
+  });
+
+  bindSlider(surpriseRateSlider, 'surpriseRate', '%', false);
+
+  roundedEdgesCheck.addEventListener('change', () => {
+    variation.roundedEdges = roundedEdgesCheck.checked;
+    roundedEdgesToggle?.classList.toggle('active', variation.roundedEdges);
+    syncSliderLabels();
+    applyVariation(false);
+  });
+
+  bindSlider(cornerRoundSlider, 'cornerRound', '%', false);
+
+  kantenCheck.addEventListener('change', () => {
+    variation.kanten = kantenCheck.checked;
+    kantenToggle?.classList.toggle('active', variation.kanten);
+    applyVariation(false);
+  });
+
+  variationResetBtn.addEventListener('click', () => {
+    variation = cloneVariation(DEFAULT_VARIATION);
+    variationSeedInput.value = String(variation.seed);
+    colorShiftSlider.value = String(variation.colorShift);
+    shapeCountSlider.value = String(variation.shapeCount);
+    sizeSpreadSlider.value = String(variation.sizeSpread);
+    spinIntensitySlider.value = String(variation.spinIntensity);
+    layoutSpreadSlider.value = String(variation.layoutSpread);
+    depthRangeSlider.value = String(variation.depthRange);
+    manualSpeedCheck.checked = variation.manualSpeed;
+    manualSpeedSlider.value = String(variation.manualSpeedValue);
+    surprisesCheck.checked = variation.surprises;
+    surpriseRateSlider.value = String(variation.surpriseRate);
+    roundedEdgesCheck.checked = variation.roundedEdges;
+    roundedEdgesToggle?.classList.toggle('active', variation.roundedEdges);
+    kantenCheck.checked = variation.kanten;
+    kantenToggle?.classList.toggle('active', variation.kanten);
+    cornerRoundSlider.value = String(variation.cornerRound);
+    colorModeSelect.value = variation.colorMode;
+    renderShapeToggles();
+    regenerateOnNextApply = true;
+    applyVariation(true);
+  });
+}
+
 function drawIdleFrame() {
-  if (analysis?.frames?.[0]) {
-    drawFrame(ctx, analysis.frames[0]);
+  if (analysis?.frames?.length) {
+    const idx = Math.min(analysis.frames.length - 1, Math.floor((performance.now() / 1000) % 8) * 30);
+    const frame = analysis.frames[idx];
+    drawFrame(ctx, { ...frame, time: performance.now() / 1000 });
   } else {
     drawBackdrop(ctx);
-    drawFrame(ctx, silentFrame());
+    drawFrame(ctx, { ...silentFrame(), time: performance.now() / 1000 });
   }
 }
 
@@ -406,9 +689,8 @@ function stopPlayback() {
   resetLiveBeatState();
   if (audioBuffer) {
     updateTimeDisplay(0, audioBuffer.duration);
-    resetRenderer(canvas.width, canvas.height);
-    drawBackdrop(ctx);
-    drawIdleFrame();
+    resetPlayhead();
+    refreshPreview();
   }
 }
 
@@ -416,10 +698,11 @@ function startPreviewLoop() {
   function loop() {
     if (!isPlaying) return;
 
+    const elapsed = playOffset + (audioContext.currentTime - playStartTime);
     const frame = liveFrameFromAnalyser(analyserNode, 128);
+    frame.time = elapsed;
     drawFrame(ctx, frame);
 
-    const elapsed = playOffset + (audioContext.currentTime - playStartTime);
     updateTimeDisplay(elapsed, audioBuffer.duration);
     previewRAF = requestAnimationFrame(loop);
   }

@@ -1,28 +1,23 @@
 import { createAudioSourceState, extractAudioSources, resetAudioSourceState } from '../audio/sources.js';
 import { resolveMappedValues, DEFAULT_MAPPINGS } from './mappingMatrix.js';
-import { CHARCOAL_BG, popArtColor, popArtStroke, POP_ART_ALPHA, POP_ART_COLORS } from './popArtPalette.js';
+import { DEFAULT_VARIATION } from './variationStore.js';
+import { DEFAULT_BG } from './backgroundStore.js';
+import { SHAPE_PRESETS, getShapeKind } from './shapePresets.js';
+import { CHARCOAL_BG, popArtColor, POP_ART_ALPHA, POP_ART_COLORS } from './popArtPalette.js';
+import { TitleLetters3D } from './titleText3d.js';
+import { titleTimingFromFrequency, DEFAULT_TITLE_FREQUENCY } from './titleStore.js';
 import {
   transformVertex,
   rotateNormal,
   projectPoint,
   shadeFactor,
-  meshForShape,
+  flatMeshForPreset,
 } from './math3d.js';
 
 const WIDTH = 1280;
 const HEIGHT = 720;
-const SHAPE_COUNT = 20;
-
-/** 0 = large rectangle slab, 1 = cube square, 2 = oval ellipsoid */
-const SHAPE_PRESETS = [
-  { rx: 210, ry: 78, rz: 52, round: 0.04 },
-  { rx: 105, ry: 105, rz: 105, round: 0.06 },
-  { rx: 135, ry: 92, rz: 88, round: 1 },
-];
-
-function rand(a = 0, b = 1) {
-  return a + Math.random() * (b - a);
-}
+const MIN_SHAPES = 8;
+const MAX_SHAPES = 28;
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
@@ -32,22 +27,26 @@ function easeInOut(t) {
   return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
 }
 
-function pickNextType(current) {
-  const options = [0, 1, 2].filter((t) => t !== current);
-  return options[Math.floor(Math.random() * options.length)];
+function createRng(seed) {
+  let s = (Math.abs(Math.floor(seed)) || 1) >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
 }
 
-function curatedLayout(n, w, h) {
+function curatedLayout(n, w, h, spread = 0.5, rng = Math.random) {
   const cols = 5;
-  const rows = 4;
+  const rows = Math.ceil(n / cols);
   const positions = [];
+  const jitterScale = 0.35 + spread * 1.65;
   for (let i = 0; i < n; i++) {
     const col = i % cols;
     const row = Math.floor(i / cols);
     const cx = ((col + 0.5) / cols) * w;
     const cy = ((row + 0.5) / rows) * h;
-    const jitterX = ((i * 47) % 90 - 45) * 1.8;
-    const jitterY = ((i * 83) % 90 - 45) * 1.4;
+    const jitterX = (((i * 47) % 90 - 45) + (rng() - 0.5) * 40) * jitterScale;
+    const jitterY = (((i * 83) % 90 - 45) + (rng() - 0.5) * 40) * jitterScale;
     positions.push({ x: cx + jitterX, y: cy + jitterY });
   }
   return positions;
@@ -61,8 +60,13 @@ function parseRgb(css) {
 
 function shadeColor(css, factor) {
   const { r, g, b } = parseRgb(css);
-  const f = Math.min(1, Math.max(0.45, factor));
+  const f = Math.min(1, Math.max(0.85, factor));
   return `rgb(${Math.round(r * f)}, ${Math.round(g * f)}, ${Math.round(b * f)})`;
+}
+
+function edgeStrokeColor(css, factor = 0.38) {
+  const { r, g, b } = parseRgb(css);
+  return `rgb(${Math.round(r * factor)}, ${Math.round(g * factor)}, ${Math.round(b * factor)})`;
 }
 
 /**
@@ -74,12 +78,51 @@ export class PopArtScene {
     this.height = height;
     this.mappings = { ...DEFAULT_MAPPINGS };
     this.viscosity = 0.38;
+    this.variation = { ...DEFAULT_VARIATION, enabledShapes: [...DEFAULT_VARIATION.enabledShapes] };
+    this.rng = createRng(this.variation.seed);
     this.sourceState = createAudioSourceState();
     this.damped = { geometry: 0, color: 0, motion: 0, morphing: 0 };
     this._prevFrameTime = null;
     this._bgCanvas = null;
+    this.bgColor = DEFAULT_BG;
     this.palette = [...POP_ART_COLORS];
-    this.shapes = this._initShapes(width, height);
+    this.colorOffset = 0;
+    this._beatFlash = 0;
+    this.shapes = [];
+    this.songTitle = '';
+    this.titleFrequency = DEFAULT_TITLE_FREQUENCY;
+    this.titleLetters = new TitleLetters3D();
+    this.titleColorIdx = 0;
+    this.title = {
+      opacity: 0,
+      shapeIndex: 0,
+      wasVisible: false,
+      surpriseHold: 0,
+    };
+    this._titleClock = 0;
+    this._surpriseRush = 1;
+    this._surpriseFlash = 0;
+    this._surpriseCooldown = 1.5;
+    this._surpriseTimer = 0;
+  }
+
+  setSongTitle(text) {
+    this.songTitle = (text || '').trim().slice(0, 80);
+    this.title.wasVisible = false;
+    this._rebuildTitleLetters();
+  }
+
+  setTitleFrequency(freq) {
+    this.titleFrequency = Math.min(100, Math.max(0, freq));
+  }
+
+  _rebuildTitleLetters() {
+    if (!this.songTitle) {
+      this.titleLetters.rebuild('');
+      return;
+    }
+    const fill = popArtColor(this.palette, this.titleColorIdx, 0, 1);
+    this.titleLetters.rebuild(this.songTitle, fill);
   }
 
   setPalette(palette) {
@@ -88,6 +131,7 @@ export class PopArtScene {
     for (let i = 0; i < this.shapes.length; i++) {
       this.shapes[i].colorIdx = i % n;
     }
+    this._rebuildTitleLetters();
   }
 
   setMappings(mappings) {
@@ -98,6 +142,51 @@ export class PopArtScene {
     this.viscosity = Math.min(1, Math.max(0, v));
   }
 
+  setBackgroundColor(color) {
+    const next = color || DEFAULT_BG;
+    if (this.bgColor !== next) {
+      this.bgColor = next;
+      this._bgCanvas = null;
+    }
+  }
+
+  setVariation(settings) {
+    const prevEnabled = [...(this.variation.enabledShapes ?? [])].sort().join(',');
+    this.variation = {
+      ...settings,
+      enabledShapes: settings.enabledShapes?.length ? [...settings.enabledShapes] : ['cube'],
+      shapeCount: Math.min(MAX_SHAPES, Math.max(MIN_SHAPES, settings.shapeCount ?? DEFAULT_VARIATION.shapeCount)),
+    };
+    this.rng = createRng(this.variation.seed);
+    const nextEnabled = [...this.variation.enabledShapes].sort().join(',');
+    if (prevEnabled !== nextEnabled) {
+      this.regenerate();
+    }
+  }
+
+  /** Rebuild scene with current variation (e.g. after seed or shape change). */
+  resetPlayhead() {
+    this._prevFrameTime = null;
+    this._titleClock = 0;
+    resetAudioSourceState(this.sourceState);
+    this.damped = { geometry: 0, color: 0, motion: 0, morphing: 0 };
+  }
+
+  regenerate() {
+    this._prevFrameTime = null;
+    this.colorOffset = 0;
+    this._beatFlash = 0;
+    this._surpriseRush = 1;
+    this._surpriseFlash = 0;
+    this._surpriseCooldown = 1.5;
+    this._surpriseTimer = 0;
+    this._titleClock = 0;
+    this.title.wasVisible = false;
+    this.title.surpriseHold = 0;
+    this.rng = createRng(this.variation.seed);
+    this.shapes = this._initShapes(this.width, this.height);
+  }
+
   reset(width = this.width, height = this.height) {
     this.width = width;
     this.height = height;
@@ -105,58 +194,92 @@ export class PopArtScene {
     this._bgCanvas = null;
     resetAudioSourceState(this.sourceState);
     this.damped = { geometry: 0, color: 0, motion: 0, morphing: 0 };
+    this.colorOffset = 0;
+    this._beatFlash = 0;
+    this._surpriseRush = 1;
+    this._surpriseFlash = 0;
+    this._surpriseCooldown = 1.5;
+    this._surpriseTimer = 0;
+    this._titleClock = 0;
+    this.title.wasVisible = false;
+    this.title.surpriseHold = 0;
+    this.rng = createRng(this.variation.seed);
     this.shapes = this._initShapes(width, height);
   }
 
+  _enabledShapeIds() {
+    const enabled = this.variation.enabledShapes.filter((id) => SHAPE_PRESETS[id]);
+    return enabled.length ? enabled : ['cube'];
+  }
+
+  _pickNextType(current, rng = this.rng) {
+    const options = this._enabledShapeIds().filter((t) => t !== current);
+    if (!options.length) return current;
+    return options[Math.floor(rng() * options.length)];
+  }
+
   _initShapes(width, height) {
-    const positions = curatedLayout(SHAPE_COUNT, width, height);
-    const typeCycle = [0, 1, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 1, 2, 0, 1, 2, 0];
+    const rng = this.rng;
+    const count = Math.min(MAX_SHAPES, Math.max(MIN_SHAPES, this.variation.shapeCount));
+    const spread = this.variation.layoutSpread / 100;
+    const sizeSpread = this.variation.sizeSpread / 100;
+    const spin = this.variation.spinIntensity / 100;
+    const depth = this.variation.depthRange / 100;
+    const enabled = this._enabledShapeIds();
+    const positions = curatedLayout(count, width, height, spread, rng);
 
     return positions.map((pos, i) => {
-      const type = typeCycle[i % typeCycle.length];
+      const type = enabled[Math.floor(rng() * enabled.length)];
       const preset = SHAPE_PRESETS[type];
-      const morphTarget = pickNextType(type);
+      const morphTarget = this._pickNextType(type, rng);
       const target = SHAPE_PRESETS[morphTarget];
+      const sizeMul = 1 + (rng() - 0.5) * sizeSpread * 0.55;
+      const zRange = 80 + depth * 200;
+      const spinMul = 0.35 + spin * 0.85;
+
       return {
         x: pos.x,
         y: pos.y,
-        z: rand(-120, 120),
-        vx: rand(-0.15, 0.15),
-        vy: rand(-0.15, 0.15),
-        vz: rand(-0.08, 0.08),
-        rotX: rand(0, Math.PI * 2),
-        rotY: rand(0, Math.PI * 2),
-        rotZ: rand(0, Math.PI * 2),
-        rotSpeedX: rand(-0.38, 0.38),
-        rotSpeedY: rand(-0.32, 0.32),
-        rotSpeedZ: rand(-0.42, 0.42),
+        z: (rng() - 0.5) * zRange * 2,
+        vx: (rng() - 0.5) * 0.3,
+        vy: (rng() - 0.5) * 0.3,
+        vz: (rng() - 0.5) * 0.16 * (0.5 + depth),
+        rotX: rng() * Math.PI * 2,
+        rotY: rng() * Math.PI * 2,
+        rotZ: rng() * Math.PI * 2,
+        rotSpeedX: (rng() - 0.5) * 0.76 * spinMul,
+        rotSpeedY: (rng() - 0.5) * 0.64 * spinMul,
+        rotSpeedZ: (rng() - 0.5) * 0.84 * spinMul,
         type,
         morphTarget,
-        morphT: rand(0, 0.4),
-        fromRx: preset.rx,
-        fromRy: preset.ry,
-        fromRz: preset.rz,
-        fromRound: preset.round,
-        toRx: target.rx,
-        toRy: target.ry,
-        toRz: target.rz,
-        toRound: target.round,
+        morphT: rng() * 0.4,
+        fromRx: preset.rx * sizeMul,
+        fromRy: preset.ry * sizeMul,
+        fromRz: preset.rz * sizeMul,
+        fromRound: preset.round ?? 0,
+        toRx: target.rx * sizeMul,
+        toRy: target.ry * sizeMul,
+        toRz: target.rz * sizeMul,
+        toRound: target.round ?? 0,
         colorIdx: i % this.palette.length,
         colorBlend: 0,
+        sizeMul,
         scale: 1,
         targetScale: 1,
+        surpriseSpinBoost: 1,
+        surpriseScale: 1,
         alpha: POP_ART_ALPHA,
       };
     });
   }
 
   _ensureBackground() {
-    if (this._bgCanvas?.width === this.width) return;
+    if (this._bgCanvas?.width === this.width && this._bgCanvasColor === this.bgColor) return;
     const c = document.createElement('canvas');
     c.width = this.width;
     c.height = this.height;
     const b = c.getContext('2d');
-    b.fillStyle = CHARCOAL_BG;
+    b.fillStyle = this.bgColor || CHARCOAL_BG;
     b.fillRect(0, 0, this.width, this.height);
 
     b.globalAlpha = 0.035;
@@ -167,24 +290,256 @@ export class PopArtScene {
     }
     b.globalAlpha = 1;
     this._bgCanvas = c;
+    this._bgCanvasColor = this.bgColor;
   }
 
   _advanceMorph(s) {
     if (s.morphT >= 1) {
       s.type = s.morphTarget;
-      s.morphTarget = pickNextType(s.type);
+      s.morphTarget = this._pickNextType(s.type);
+      const enabled = new Set(this._enabledShapeIds());
+      if (!enabled.has(s.type)) {
+        s.type = this._pickNextType(s.type);
+      }
+      if (!enabled.has(s.morphTarget)) {
+        s.morphTarget = this._pickNextType(s.type);
+      }
       const preset = SHAPE_PRESETS[s.type];
       const target = SHAPE_PRESETS[s.morphTarget];
-      s.fromRx = preset.rx;
-      s.fromRy = preset.ry;
-      s.fromRz = preset.rz;
-      s.fromRound = preset.round;
-      s.toRx = target.rx;
-      s.toRy = target.ry;
-      s.toRz = target.rz;
-      s.toRound = target.round;
+      s.fromRx = preset.rx * s.sizeMul;
+      s.fromRy = preset.ry * s.sizeMul;
+      s.fromRz = preset.rz * s.sizeMul;
+      s.fromRound = preset.round ?? 0;
+      s.toRx = target.rx * s.sizeMul;
+      s.toRy = target.ry * s.sizeMul;
+      s.toRz = target.rz * s.sizeMul;
+      s.toRound = target.round ?? 0;
       s.morphT = 0;
     }
+  }
+
+  _updateColorVariation(sources, frame, dt) {
+    const shift = this.variation.colorShift / 100;
+    const mode = this.variation.colorMode;
+
+    if (mode === 'manual') return;
+
+    if (mode === 'tempo') {
+      const phase = sources.tempoPhase ?? 0;
+      this.colorOffset = lerp(this.colorOffset, phase * shift * this.palette.length * 0.35, 0.04);
+    } else if (mode === 'energy') {
+      const amp = sources.amplitude ?? 0;
+      const pulse = frame.beatPulse ?? 0;
+      if (frame.beat) this._beatFlash = 1;
+      this._beatFlash = Math.max(0, this._beatFlash - dt * 3.5);
+      const target = amp * shift * 0.4 + this._beatFlash * shift * 0.6 + pulse * shift * 0.25;
+      this.colorOffset = lerp(this.colorOffset, target * this.palette.length, 0.06);
+    }
+  }
+
+  _effectiveColorIdx(s) {
+    return s.colorIdx + this.colorOffset;
+  }
+
+  _pickTitleHostIndex() {
+    const preferred = new Set(['rectangle', 'cube', 'pillar']);
+    const candidates = [];
+
+    for (let i = 0; i < this.shapes.length; i++) {
+      const s = this.shapes[i];
+      const type = s.morphT < 0.5 ? s.type : s.morphTarget;
+      if (preferred.has(type)) candidates.push(i);
+    }
+
+    if (candidates.length) {
+      return candidates[Math.floor(this.rng() * candidates.length)];
+    }
+    return Math.floor(this.rng() * this.shapes.length);
+  }
+
+  _snapMorphShape(s) {
+    s.type = s.morphTarget;
+    s.morphTarget = this._pickNextType(s.type);
+    const enabled = new Set(this._enabledShapeIds());
+    if (!enabled.has(s.type)) s.type = this._pickNextType(s.type);
+    if (!enabled.has(s.morphTarget)) s.morphTarget = this._pickNextType(s.type);
+    const preset = SHAPE_PRESETS[s.type];
+    const target = SHAPE_PRESETS[s.morphTarget];
+    s.fromRx = preset.rx * s.sizeMul;
+    s.fromRy = preset.ry * s.sizeMul;
+    s.fromRz = preset.rz * s.sizeMul;
+    s.fromRound = preset.round ?? 0;
+    s.toRx = target.rx * s.sizeMul;
+    s.toRy = target.ry * s.sizeMul;
+    s.toRz = target.rz * s.sizeMul;
+    s.toRound = target.round ?? 0;
+    s.morphT = 0;
+  }
+
+  _fireSurprise(frame) {
+    const types = ['turbo', 'whirl', 'pop', 'slingshot', 'morph-flip', 'palette-jolt', 'flash'];
+    if (this.songTitle) types.push('title-pop');
+    const type = types[Math.floor(this.rng() * types.length)];
+    const si = Math.floor(this.rng() * this.shapes.length);
+    const s = this.shapes[si];
+
+    switch (type) {
+      case 'turbo':
+        this._surpriseRush = 3.4;
+        this._surpriseFlash = 0.18;
+        break;
+      case 'whirl':
+        s.surpriseSpinBoost = 7 + this.rng() * 5;
+        break;
+      case 'pop':
+        s.surpriseScale = 2.1 + this.rng() * 0.7;
+        break;
+      case 'slingshot':
+        s.vx += (this.rng() - 0.5) * 3.2;
+        s.vy += (this.rng() - 0.5) * 3.2;
+        s.vz += (this.rng() - 0.5) * 2.4;
+        break;
+      case 'morph-flip':
+        this._snapMorphShape(s);
+        s.surpriseScale = 1.35 + this.rng() * 0.25;
+        break;
+      case 'palette-jolt':
+        this.colorOffset += (Math.floor(this.rng() * 4) + 2) * (this.rng() > 0.5 ? 1 : -1);
+        this._surpriseFlash = 0.42;
+        if (frame.beat) this._beatFlash = 1;
+        break;
+      case 'title-pop':
+        this.title.surpriseHold = 2.4;
+        this.title.shapeIndex = this._pickTitleHostIndex();
+        this.titleColorIdx = Math.floor(this.rng() * this.palette.length);
+        this._rebuildTitleLetters();
+        this.title.opacity = 1;
+        this.title.wasVisible = true;
+        break;
+      case 'flash':
+        this._surpriseFlash = 0.62;
+        break;
+      default:
+        break;
+    }
+  }
+
+  _updateSurprises(sources, frame, dt) {
+    if (this._surpriseRush > 1) {
+      this._surpriseRush = Math.max(1, this._surpriseRush - dt * 2.4);
+    }
+    this._surpriseFlash = Math.max(0, this._surpriseFlash - dt * 2.6);
+
+    for (const s of this.shapes) {
+      if (s.surpriseSpinBoost > 1) {
+        s.surpriseSpinBoost = Math.max(1, s.surpriseSpinBoost - dt * 3.2);
+      }
+      if (s.surpriseScale > 1.01) {
+        s.surpriseScale = lerp(s.surpriseScale, 1, Math.min(1, dt * 2.8));
+      } else {
+        s.surpriseScale = 1;
+      }
+    }
+
+    if (!this.variation.surprises) return;
+    const rate = (this.variation.surpriseRate ?? 55) / 100;
+    if (rate <= 0) return;
+
+    this._surpriseCooldown = Math.max(0, this._surpriseCooldown - dt);
+    if (this._surpriseCooldown > 0) return;
+
+    const beatBoost = frame.beat ? 0.45 : 0;
+    const energyBoost = (sources.amplitude ?? 0) * 0.3;
+    const interval = 5 + (1 - rate) * 16;
+
+    this._surpriseTimer -= dt;
+    const roll = this.rng();
+    const beatGate = frame.beat || this._surpriseTimer <= 0;
+    const chance = dt * (0.12 + rate * 0.38 + beatBoost + energyBoost);
+
+    if (!beatGate && roll > chance) return;
+
+    this._fireSurprise(frame);
+    this._surpriseCooldown = interval * (0.45 + this.rng() * 0.75);
+    this._surpriseTimer = 0.35 + this.rng() * 0.55;
+  }
+
+  _updateTitle(frame, dt = 1 / 30) {
+    if (!this.songTitle || !this.shapes.length) {
+      this.title.opacity = 0;
+      this.title.wasVisible = false;
+      this.title.surpriseHold = 0;
+      return;
+    }
+
+    if (this.title.surpriseHold > 0) {
+      this.title.surpriseHold = Math.max(0, this.title.surpriseHold - dt);
+      this.title.opacity = 1;
+      this.title.wasVisible = true;
+      if (frame.beat) {
+        this.titleColorIdx = (this.titleColorIdx + 1) % this.palette.length;
+        this._rebuildTitleLetters();
+      }
+      return;
+    }
+
+    let t = frame.time;
+    if (t == null || !Number.isFinite(t)) {
+      this._titleClock += dt;
+      t = this._titleClock;
+    }
+
+    const { cycleSec, showSec, fadeSec } = titleTimingFromFrequency(this.titleFrequency);
+    const phaseOffset = ((this.variation.seed % 100) / 100) * Math.max(0, cycleSec - showSec - 0.5);
+    const pos = (t + phaseOffset) % cycleSec;
+    const inWindow = pos < showSec;
+
+    let opacity = 0;
+    if (inWindow) {
+      if (pos < fadeSec) opacity = pos / fadeSec;
+      else if (pos > showSec - fadeSec) opacity = (showSec - pos) / fadeSec;
+      else opacity = 1;
+    }
+
+    if (inWindow && !this.title.wasVisible) {
+      this.title.shapeIndex = this._pickTitleHostIndex();
+      this.titleColorIdx = Math.floor(this.rng() * this.palette.length);
+      this._rebuildTitleLetters();
+    }
+
+    if (frame.beat && inWindow && opacity > 0.5) {
+      this.titleColorIdx = (this.titleColorIdx + 1) % this.palette.length;
+      this._rebuildTitleLetters();
+    }
+
+    this.title.wasVisible = inWindow;
+    this.title.opacity = opacity;
+  }
+
+  _collectTitleDrawables(s, shapeParams) {
+    if (this.title.opacity <= 0.01 || !this.songTitle) {
+      return { solids: [] };
+    }
+
+    const w = this.width;
+    const h = this.height;
+    const rot = [s.rotX, s.rotY, s.rotZ];
+    const offset = [s.x - w / 2, s.y - h / 2, s.z];
+    const faceFill = popArtColor(this.palette, this.titleColorIdx, 0, 1);
+    const sideFill = popArtColor(this.palette, this.titleColorIdx + 1, 0, 1);
+    const edgeFill = popArtColor(this.palette, this.titleColorIdx + 2, 0, 1);
+
+    return this.titleLetters.collectDrawables(
+      rot,
+      offset,
+      shapeParams,
+      w,
+      h,
+      faceFill,
+      sideFill,
+      edgeFill,
+      !!this.variation.kanten,
+    );
   }
 
   update(frame) {
@@ -204,27 +559,38 @@ export class PopArtScene {
       this.damped[key] = lerp(this.damped[key], raw[key] ?? 0, dampRate);
     }
 
+    this._updateColorVariation(sources, frame, dt);
+    this._updateSurprises(sources, frame, dt);
+
     const geo = this.damped.geometry;
-    const col = this.damped.color;
-    const mot = this.damped.motion;
-    const morph = this.damped.morphing;
+    let mot = this.damped.motion;
+    let morph = this.damped.morphing;
+    const depth = this.variation.depthRange / 100;
+
+    if (this.variation.manualSpeed) {
+      const manual = this.variation.manualSpeedValue / 100;
+      mot = manual;
+      morph = manual * 0.8;
+    }
+
+    mot *= this._surpriseRush;
 
     const drag = 0.978 + visc * 0.018;
-    const driftSpeed = 14 + (1 - visc) * 48 + mot * 28;
-    const morphRate = 0.012 + morph * 0.035 + (1 - visc) * 0.012;
-    const rotRate = 0.22 + mot * 0.35;
+    const driftSpeed = 16 + (1 - visc) * 62 + mot * 78;
+    const morphRate = 0.015 + morph * 0.07 + (1 - visc) * 0.018;
+    const spinMul = 0.35 + (this.variation.spinIntensity / 100) * 0.85;
+    const rotRate = (0.24 + mot * 0.72) * spinMul;
     const breathe = 1 + geo * 0.22;
+    const zLimit = 180 + depth * 140;
 
     for (const s of this.shapes) {
       s.targetScale = breathe + Math.sin(s.rotY * 0.5) * geo * 0.06;
       s.scale = lerp(s.scale, s.targetScale, 0.055);
 
-      s.colorBlend = lerp(s.colorBlend, col * 0.85, 0.035);
-
       const angle = s.rotY + mot * 0.9;
       s.vx += Math.cos(angle) * mot * 0.012;
       s.vy += Math.sin(angle * 0.7) * mot * 0.012;
-      s.vz += Math.sin(angle * 0.5) * mot * 0.008;
+      s.vz += Math.sin(angle * 0.5) * mot * 0.008 * (0.6 + depth * 0.6);
       s.vx *= drag;
       s.vy *= drag;
       s.vz *= drag;
@@ -233,94 +599,182 @@ export class PopArtScene {
       s.y += s.vy * driftSpeed * dt;
       s.z += s.vz * driftSpeed * dt * 0.85;
 
-      s.rotX += s.rotSpeedX * rotRate * dt;
-      s.rotY += s.rotSpeedY * rotRate * dt;
-      s.rotZ += s.rotSpeedZ * rotRate * dt;
+      s.rotX += s.rotSpeedX * rotRate * dt * s.surpriseSpinBoost;
+      s.rotY += s.rotSpeedY * rotRate * dt * s.surpriseSpinBoost;
+      s.rotZ += s.rotSpeedZ * rotRate * dt * s.surpriseSpinBoost;
 
       const pad = 220;
       if (s.x < -pad) s.x = this.width + pad;
       if (s.x > this.width + pad) s.x = -pad;
       if (s.y < -pad) s.y = this.height + pad;
       if (s.y > this.height + pad) s.y = -pad;
-      if (s.z > 280) s.z = -280;
-      if (s.z < -280) s.z = 280;
+      if (s.z > zLimit) s.z = -zLimit;
+      if (s.z < -zLimit) s.z = zLimit;
 
       s.morphT = Math.min(1, s.morphT + morphRate * dt);
       this._advanceMorph(s);
     }
+
+    this._updateTitle(frame, dt);
   }
 
-  _shapeDimensions(s) {
+  _shapeRenderParams(s) {
     const t = easeInOut(s.morphT);
+    const kind = t < 0.5 ? getShapeKind(s.type) : getShapeKind(s.morphTarget);
+    const sizeScale = s.scale * (s.surpriseScale ?? 1);
+    const rounded = !!this.variation.roundedEdges;
+    const cornerAmt = (this.variation.cornerRound ?? 45) / 100;
+    const presetRound = lerp(s.fromRound, s.toRound, t);
+    const round = rounded ? Math.min(1, presetRound * 0.5 + cornerAmt * 0.92) : 0;
     return {
-      rx: lerp(s.fromRx, s.toRx, t) * s.scale,
-      ry: lerp(s.fromRy, s.toRy, t) * s.scale,
-      rz: lerp(s.fromRz, s.toRz, t) * s.scale,
-      round: lerp(s.fromRound, s.toRound, t),
+      kind,
+      rx: lerp(s.fromRx, s.toRx, t) * sizeScale,
+      ry: lerp(s.fromRy, s.toRy, t) * sizeScale,
+      rz: lerp(s.fromRz, s.toRz, t) * sizeScale,
+      round: rounded ? Math.min(1, presetRound * 0.5 + cornerAmt * 0.92) : 0,
+      roundedEdges: rounded,
     };
   }
 
-  _collectDrawables() {
-    const drawables = [];
+  _meshForShape(params) {
+    const { kind, rx, ry, rz, round, roundedEdges } = params;
+    return flatMeshForPreset(kind, rx, ry, rz, round, roundedEdges);
+  }
+
+  _shapeDepth(s) {
     const w = this.width;
     const h = this.height;
+    const params = this._shapeRenderParams(s);
+    const mesh = this._meshForShape(params);
+    const offset = [s.x - w / 2, s.y - h / 2, s.z];
+    const rot = [s.rotX, s.rotY, s.rotZ];
+    let sum = 0;
+    let count = 0;
 
-    for (const s of this.shapes) {
-      const { rx, ry, rz, round } = this._shapeDimensions(s);
-      const mesh = meshForShape(rx, ry, rz, round);
-      const offset = [s.x - w / 2, s.y - h / 2, s.z];
-      const rot = [s.rotX, s.rotY, s.rotZ];
-      const baseFill = popArtColor(this.palette, s.colorIdx, s.colorBlend, 1);
-      const strokeBase = popArtStroke(this.palette, s.colorIdx, 1);
+    for (const face of mesh) {
+      const worldVerts = face.verts.map((v) => transformVertex(v, rot, offset));
+      const viewNormal = rotateNormal(face.normal, rot);
+      if (viewNormal[2] <= 0.05) continue;
+      sum += worldVerts.reduce((acc, v) => acc + v[2], 0) / worldVerts.length;
+      count++;
+    }
 
-      for (const face of mesh) {
-        const worldVerts = face.verts.map((v) => transformVertex(v, rot, offset));
-        const viewNormal = rotateNormal(face.normal, rot);
-        if (viewNormal[2] <= 0.05) continue;
+    return count ? sum / count : s.z;
+  }
 
-        const projected = worldVerts.map((v) => projectPoint(v, w, h));
-        const avgZ = projected.reduce((sum, p) => sum + p.z, 0) / projected.length;
-        const shade = shadeFactor(viewNormal);
+  _collectShapeDrawables(s) {
+    const w = this.width;
+    const h = this.height;
+    const params = this._shapeRenderParams(s);
+    const mesh = this._meshForShape(params);
+    const offset = [s.x - w / 2, s.y - h / 2, s.z];
+    const rot = [s.rotX, s.rotY, s.rotZ];
+    const colorIdx = this._effectiveColorIdx(s);
+    const baseFill = popArtColor(this.palette, colorIdx, 0, 1);
+    const drawables = [];
+    const showEdges = !!this.variation.kanten;
 
-        drawables.push({
-          avgZ,
-          projected,
-          fill: shadeColor(baseFill, shade),
-          stroke: strokeBase,
-        });
-      }
+    for (const face of mesh) {
+      const worldVerts = face.verts.map((v) => transformVertex(v, rot, offset));
+      const viewNormal = rotateNormal(face.normal, rot);
+      if (viewNormal[2] <= 0.05) continue;
+
+      const projected = worldVerts.map((v) => projectPoint(v, w, h));
+      const avgZ = projected.reduce((acc, p) => acc + p.z, 0) / projected.length;
+      const shade = shadeFactor(viewNormal);
+      const fill = shadeColor(baseFill, shade);
+
+      drawables.push({
+        avgZ,
+        projected,
+        fill,
+        stroke: showEdges ? edgeStrokeColor(fill) : null,
+      });
     }
 
     drawables.sort((a, b) => a.avgZ - b.avgZ);
     return drawables;
   }
 
-  draw(ctx) {
-    this._ensureBackground();
-    ctx.drawImage(this._bgCanvas, 0, 0);
+  _ensureShapeLayer() {
+    if (!this._shapeLayer || this._shapeLayer.width !== this.width || this._shapeLayer.height !== this.height) {
+      this._shapeLayer = document.createElement('canvas');
+      this._shapeLayer.width = this.width;
+      this._shapeLayer.height = this.height;
+    }
+    return this._shapeLayer;
+  }
 
-    const strokeW = 2 + this.damped.geometry * 2;
-    const drawables = this._collectDrawables();
+  _drawShapeLayer(lc, s, shapeIndex) {
+    const shapeParams = this._shapeRenderParams(s);
+    const drawables = this._collectShapeDrawables(s);
+    const titleOnShape = shapeIndex === this.title.shapeIndex && this.title.opacity > 0.01;
+    const letterDrawables = titleOnShape ? this._collectTitleDrawables(s, shapeParams) : { solids: [] };
+
+    lc.clearRect(0, 0, this.width, this.height);
 
     for (const d of drawables) {
       const pts = d.projected;
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.closePath();
-      ctx.fillStyle = d.fill;
-      ctx.fill();
+      lc.beginPath();
+      lc.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) lc.lineTo(pts[i].x, pts[i].y);
+      lc.closePath();
+      lc.fillStyle = d.fill;
+      lc.fill();
+      if (d.stroke) {
+        lc.strokeStyle = d.stroke;
+        lc.lineWidth = 1.15;
+        lc.stroke();
+      }
     }
 
-    for (const d of drawables) {
-      const pts = d.projected;
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.closePath();
-      ctx.lineWidth = strokeW;
-      ctx.strokeStyle = d.stroke;
-      ctx.stroke();
+    if (titleOnShape) {
+      const combined = [...letterDrawables.solids].sort((a, b) => a.avgZ - b.avgZ);
+      for (const d of combined) {
+        const pts = d.projected;
+        lc.beginPath();
+        lc.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) lc.lineTo(pts[i].x, pts[i].y);
+        lc.closePath();
+        lc.globalAlpha = this.title.opacity;
+        lc.fillStyle = d.fill;
+        lc.fill();
+        if (d.stroke) {
+          lc.strokeStyle = d.stroke;
+          lc.lineWidth = 1;
+          lc.stroke();
+        }
+      }
+      lc.globalAlpha = 1;
+    }
+  }
+
+  draw(ctx) {
+    this._ensureBackground();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(this._bgCanvas, 0, 0);
+
+    const layer = this._ensureShapeLayer();
+    const lc = layer.getContext('2d');
+    lc.globalAlpha = 1;
+    lc.globalCompositeOperation = 'source-over';
+
+    const sortedEntries = this.shapes
+      .map((s, i) => ({ s, i, depth: this._shapeDepth(s) }))
+      .sort((a, b) => a.depth - b.depth);
+
+    for (const { s, i } of sortedEntries) {
+      this._drawShapeLayer(lc, s, i);
+      ctx.drawImage(layer, 0, 0);
+    }
+
+    if (this._surpriseFlash > 0.01) {
+      const flashColor = popArtColor(this.palette, this.colorOffset + 2, 0, 1);
+      ctx.globalAlpha = this._surpriseFlash * 0.28;
+      ctx.fillStyle = flashColor;
+      ctx.fillRect(0, 0, this.width, this.height);
+      ctx.globalAlpha = 1;
     }
   }
 }

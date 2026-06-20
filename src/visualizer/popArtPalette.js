@@ -25,11 +25,16 @@ export function popArtColor(palette, idx, blend = 0, alpha = POP_ART_ALPHA) {
   const r = Math.round(a.r + (b.r - a.r) * t);
   const g = Math.round(a.g + (b.g - a.g) * t);
   const bch = Math.round(a.b + (b.b - a.b) * t);
+  if (alpha >= 1) return `rgb(${r}, ${g}, ${bch})`;
   return `rgba(${r}, ${g}, ${bch}, ${alpha})`;
 }
 
 export function popArtStroke(palette, idx, alpha = 1) {
   const colors = resolvePalette(palette);
   const c = colors[((Math.floor(idx) % colors.length) + colors.length) % colors.length];
-  return `rgba(${Math.max(0, c.r - 30)}, ${Math.max(0, c.g - 30)}, ${Math.max(0, c.b - 30)}, ${alpha})`;
+  const r = Math.max(0, c.r - 30);
+  const g = Math.max(0, c.g - 30);
+  const b = Math.max(0, c.b - 30);
+  if (alpha >= 1) return `rgb(${r}, ${g}, ${b})`;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }

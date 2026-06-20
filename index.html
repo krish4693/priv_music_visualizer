@@ -21,6 +21,19 @@
           <span class="dropzone-text">Drop MP3 / WAV or click</span>
         </label>
         <p class="file-name" id="file-name">No audio loaded</p>
+        <label class="title-field">
+          <span class="title-field-label">Song title</span>
+          <span class="title-field-hint">Extruded 3D letters on a shape — tumbling with it</span>
+          <input type="text" id="song-title-input" maxlength="80" placeholder="Track title" autocomplete="off" />
+          <label class="title-frequency">
+            <span class="title-frequency-label">Title frequency</span>
+            <span class="title-field-hint">How often the 3D title appears on a shape — rare ← → often</span>
+            <div class="title-frequency-row">
+              <input type="range" id="title-frequency-slider" min="0" max="100" step="1" aria-label="Title appearance frequency" />
+              <span class="title-frequency-val" id="title-frequency-val">45%</span>
+            </div>
+          </label>
+        </label>
         <div class="progress-wrap" id="upload-progress-wrap" hidden>
           <p class="progress-heading">Upload &amp; analysis</p>
           <div class="progress-bar">
@@ -72,7 +85,133 @@
             <input type="color" id="color-picker" value="#00dcff" aria-label="Pick a custom color" />
             <button type="button" id="add-color-btn">Add color</button>
           </div>
+          <div class="palette-bg">
+            <label class="bg-color-label">
+              <span>Background</span>
+              <input type="color" id="bg-color-picker" value="#1c1c1e" aria-label="Background color" />
+            </label>
+          </div>
         </div>
+      </section>
+
+      <section class="variation-section" id="variation-section">
+        <div class="variation-header">
+          <span class="variation-title">Clip variation</span>
+          <span class="variation-hint">Shape mix, color cycling, and layout — each seed gives a slightly different look.</span>
+        </div>
+
+        <div class="variation-seed-row">
+          <label class="variation-seed">
+            <span>Seed</span>
+            <input type="number" id="variation-seed" min="1" max="99999" step="1" aria-label="Variation seed" />
+          </label>
+          <button type="button" class="variation-new-btn" id="variation-new-btn">New variation</button>
+        </div>
+
+        <div class="variation-group">
+          <span class="variation-group-label">Shape types</span>
+          <div class="shape-toggles" id="shape-toggles"></div>
+        </div>
+
+        <div class="variation-group">
+          <span class="variation-group-label">Surface</span>
+          <div class="surface-toggles">
+            <label class="shape-toggle" id="rounded-edges-toggle">
+              <input type="checkbox" id="rounded-edges-check" aria-label="Rounded edges" />
+              <span>Rounded edges</span>
+            </label>
+            <label class="shape-toggle active" id="kanten-toggle">
+              <input type="checkbox" id="kanten-check" checked aria-label="Kanten — edge outlines" />
+              <span>Kanten</span>
+            </label>
+          </div>
+          <span class="variation-field-hint">Flat faces by default — rounded edges soften corners &amp; curves; Kanten draws edge lines.</span>
+          <label class="variation-field">
+            <span class="variation-field-label">Corner roundness</span>
+            <span class="variation-field-hint">How soft corners and edges appear (with Rounded edges on)</span>
+            <div class="variation-slider-row">
+              <input type="range" id="corner-round-slider" min="0" max="100" step="1" aria-label="Corner roundness" />
+              <span class="variation-val" id="corner-round-val">45%</span>
+            </div>
+          </label>
+        </div>
+
+        <div class="variation-grid">
+          <label class="variation-field">
+            <span class="variation-field-label">Color cycling</span>
+            <select id="color-mode-select" aria-label="Color cycling mode"></select>
+          </label>
+          <label class="variation-field">
+            <span class="variation-field-label">Color shift</span>
+            <span class="variation-field-hint">How much colors move (tempo / energy modes)</span>
+            <div class="variation-slider-row">
+              <input type="range" id="color-shift-slider" min="0" max="100" step="1" aria-label="Color shift intensity" />
+              <span class="variation-val" id="color-shift-val">65%</span>
+            </div>
+          </label>
+          <label class="variation-field">
+            <span class="variation-field-label">Shape count</span>
+            <div class="variation-slider-row">
+              <input type="range" id="shape-count-slider" min="8" max="28" step="1" aria-label="Number of shapes" />
+              <span class="variation-val" id="shape-count-val">20</span>
+            </div>
+          </label>
+          <label class="variation-field">
+            <span class="variation-field-label">Size spread</span>
+            <span class="variation-field-hint">Random size differences between shapes</span>
+            <div class="variation-slider-row">
+              <input type="range" id="size-spread-slider" min="0" max="100" step="1" aria-label="Size spread" />
+              <span class="variation-val" id="size-spread-val">35%</span>
+            </div>
+          </label>
+          <label class="variation-field">
+            <span class="variation-field-label">Spin intensity</span>
+            <div class="variation-slider-row">
+              <input type="range" id="spin-intensity-slider" min="0" max="100" step="1" aria-label="Spin intensity" />
+              <span class="variation-val" id="spin-intensity-val">50%</span>
+            </div>
+          </label>
+          <label class="variation-field">
+            <span class="variation-field-label">Layout spread</span>
+            <span class="variation-field-hint">Tighter grid vs scattered placement</span>
+            <div class="variation-slider-row">
+              <input type="range" id="layout-spread-slider" min="0" max="100" step="1" aria-label="Layout spread" />
+              <span class="variation-val" id="layout-spread-val">50%</span>
+            </div>
+          </label>
+          <label class="variation-field">
+            <span class="variation-field-label">Depth range</span>
+            <span class="variation-field-hint">How far shapes move in 3D depth</span>
+            <div class="variation-slider-row">
+              <input type="range" id="depth-range-slider" min="0" max="100" step="1" aria-label="Depth range" />
+              <span class="variation-val" id="depth-range-val">45%</span>
+            </div>
+          </label>
+          <label class="variation-field variation-field-full">
+            <label class="manual-speed-toggle">
+              <input type="checkbox" id="manual-speed-check" aria-label="Use manual animation speed" />
+              <span>Manual animation speed</span>
+            </label>
+            <span class="variation-field-hint">Override music-driven motion with a fixed speed</span>
+            <div class="variation-slider-row">
+              <input type="range" id="manual-speed-slider" min="0" max="250" step="1" aria-label="Manual animation speed" />
+              <span class="variation-val" id="manual-speed-val">50%</span>
+            </div>
+          </label>
+          <label class="variation-field variation-field-full">
+            <label class="manual-speed-toggle">
+              <input type="checkbox" id="surprises-check" checked aria-label="Enable random surprises" />
+              <span>Random surprises</span>
+            </label>
+            <span class="variation-field-hint">Turbo bursts, spin pops, color jolts &amp; title flashes on beats</span>
+            <div class="variation-slider-row">
+              <input type="range" id="surprise-rate-slider" min="0" max="100" step="1" aria-label="Surprise frequency" />
+              <span class="variation-val" id="surprise-rate-val">55%</span>
+            </div>
+          </label>
+        </div>
+
+        <button type="button" class="variation-reset" id="variation-reset">Reset variation defaults</button>
       </section>
 
       <section class="canvas-section">
