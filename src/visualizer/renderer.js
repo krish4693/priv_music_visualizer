@@ -1,29 +1,27 @@
-import { ImageMusicScene } from './imageMusicScene.js';
+import { PopArtScene } from './popArtScene.js';
 import { loadMappingMatrix, cloneMappings, loadViscosity } from './mappingMatrix.js';
 
 const WIDTH = 1280;
 const HEIGHT = 720;
-const BG = '#0a0a0a';
 
 let scene = null;
 let currentMappings = loadMappingMatrix();
 let currentViscosity = loadViscosity();
-let currentImage = null;
+let currentPalette = null;
 
-export function setVisualizerImage(img) {
-  currentImage = img ?? null;
-  scene?.setImage(currentImage);
-}
+export function setVisualizerImage(_img) {}
 
 export function getVisualizerImage() {
-  return currentImage;
+  return null;
 }
 
-/** @deprecated kept for compat — no-op */
-export function setVisualizerPalette(_palette) {}
+export function setVisualizerPalette(palette) {
+  currentPalette = palette?.length ? palette : null;
+  scene?.setPalette(currentPalette);
+}
 
 export function getVisualizerPalette() {
-  return [];
+  return currentPalette;
 }
 
 export function setBackgroundImages(_images) {}
@@ -47,18 +45,18 @@ export function getViscosity() {
 }
 
 export function resetRenderer(width = WIDTH, height = HEIGHT) {
-  scene = new ImageMusicScene(width, height);
-  scene.setImage(currentImage);
+  scene = new PopArtScene(width, height);
   scene.setMappings(currentMappings);
   scene.setViscosity(currentViscosity);
+  if (currentPalette) scene.setPalette(currentPalette);
 }
 
 export function drawFrame(ctx, frame, _title = '') {
   if (!scene) {
-    scene = new ImageMusicScene(ctx.canvas.width || WIDTH, ctx.canvas.height || HEIGHT);
-    scene.setImage(currentImage);
+    scene = new PopArtScene(ctx.canvas.width || WIDTH, ctx.canvas.height || HEIGHT);
     scene.setMappings(currentMappings);
     scene.setViscosity(currentViscosity);
+    if (currentPalette) scene.setPalette(currentPalette);
   }
   scene.update(frame);
   scene.draw(ctx);
@@ -69,6 +67,6 @@ export function getCanvasSize() {
 }
 
 export function drawBackdrop(ctx) {
-  ctx.fillStyle = BG;
+  ctx.fillStyle = '#1c1c1e';
   ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 }

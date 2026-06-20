@@ -1,5 +1,5 @@
-export const MAPPING_STORAGE_KEY = 'visualizer-image-mapping-v1';
-export const VISCOSITY_STORAGE_KEY = 'visualizer-image-viscosity';
+export const MAPPING_STORAGE_KEY = 'visualizer-popart-mapping-v1';
+export const VISCOSITY_STORAGE_KEY = 'visualizer-popart-viscosity';
 
 /** @typedef {{ source: string, sensitivity: number }} MappingEntry */
 /** @typedef {Record<string, MappingEntry>} MappingMatrix */
@@ -14,25 +14,21 @@ export const AUDIO_SOURCES = [
 ];
 
 export const VISUAL_TARGETS = [
-  { id: 'zoom', label: 'Zoom & Scale', hint: 'Punch-in / pull-back on the beat' },
-  { id: 'motion', label: 'Pan & Drift', hint: 'Gentle travel across the frame (no rotation)' },
-  { id: 'color', label: 'Color & Tone', hint: 'Hue shift, saturation, contrast' },
-  { id: 'glitch', label: 'Glitch & Slices', hint: 'Horizontal band shifts + RGB split' },
-  { id: 'wave', label: 'Wave Distortion', hint: 'Ripple and bend the image' },
-  { id: 'shapeMorph', label: 'Shape Morph', hint: 'Clip image through morphing rectangles, squares, ovals & diamonds' },
+  { id: 'geometry', label: 'Geometry / Size', hint: 'Scale, depth, stroke weight' },
+  { id: 'color', label: 'Color Dynamics', hint: 'Palette color blending' },
+  { id: 'motion', label: 'Motion / Drift', hint: 'Travel speed and 3D rotation' },
+  { id: 'morphing', label: 'Shape Morphing', hint: 'Morph rate between rectangle, cube, oval' },
 ];
 
 /** @type {MappingMatrix} */
 export const DEFAULT_MAPPINGS = {
-  zoom: { source: 'low', sensitivity: 0.85 },
-  motion: { source: 'tempoPhase', sensitivity: 0.9 },
+  geometry: { source: 'low', sensitivity: 0.85 },
   color: { source: 'mid', sensitivity: 0.75 },
-  glitch: { source: 'high', sensitivity: 0.8 },
-  wave: { source: 'amplitude', sensitivity: 0.7 },
-  shapeMorph: { source: 'mid', sensitivity: 0.8 },
+  motion: { source: 'tempoPhase', sensitivity: 0.9 },
+  morphing: { source: 'high', sensitivity: 0.7 },
 };
 
-export const DEFAULT_VISCOSITY = 0.35;
+export const DEFAULT_VISCOSITY = 0.38;
 
 function clamp01(v) {
   return Math.min(1, Math.max(0, v));

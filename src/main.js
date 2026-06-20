@@ -3,9 +3,9 @@ import {
   drawFrame,
   drawBackdrop,
   resetRenderer,
-  setVisualizerImage,
   setMappingMatrix,
   setViscosity,
+  setVisualizerPalette,
 } from './visualizer/renderer.js';
 import {
   AUDIO_SOURCES,
@@ -19,23 +19,24 @@ import {
   cloneMappings,
 } from './visualizer/mappingMatrix.js';
 import { exportToMp4 } from './export/ffmpegExport.js';
-import { saveAudio, loadAudio, saveImage, loadAllImages, deleteImage } from './storage/db.js';
-import { extractPaletteFromFile, fileToImageSource, blobToFile } from './images/palette.js';
+import { saveAudio, loadAudio } from './storage/db.js';
+import { POP_ART_COLORS } from './visualizer/popArtPalette.js';
+import {
+  loadFullPalette,
+  saveCustomColors,
+  loadSelectedIndices,
+  saveSelectedIndices,
+  getActivePalette,
+  hexToRgb,
+  colorKey,
+} from './visualizer/paletteStore.js';
 
-const ACTIVE_IMAGE_KEY = 'visualizer-active-image-id';
 const BUNDLED_AUDIO_URL = '/samples/aboud-vs-flab.wav';
 const BUNDLED_AUDIO_NAME = '02 AboudVsFlab.wav';
-const BUNDLED_IMAGE_URL = '/samples/flab-the-blue-monk.jpg';
-const BUNDLED_IMAGE_NAME = 'flab-the-blue-monk.jpg';
-const BUNDLED_IMAGE_ID = 'bundled-cover';
 
 const fileInput = document.getElementById('file-input');
 const dropzone = document.getElementById('dropzone');
 const fileNameEl = document.getElementById('file-name');
-const imageInput = document.getElementById('image-input');
-const imageDropzone = document.getElementById('image-dropzone');
-const imageCountEl = document.getElementById('image-count');
-const imageGallery = document.getElementById('image-gallery');
 const canvas = document.getElementById('visualizer');
 const playBtn = document.getElementById('play-btn');
 const stopBtn = document.getElementById('stop-btn');
@@ -53,8 +54,14 @@ const mappingBody = document.getElementById('mapping-body');
 const mappingResetBtn = document.getElementById('mapping-reset');
 const viscositySlider = document.getElementById('viscosity-slider');
 const viscosityVal = document.getElementById('viscosity-val');
+const paletteSwatches = document.getElementById('palette-swatches');
+const colorPicker = document.getElementById('color-picker');
+const addColorBtn = document.getElementById('add-color-btn');
 
 const ctx = canvas.getContext('2d');
+
+let fullPalette = loadFullPalette();
+let selectedPaletteIndices = loadSelectedIndices(fullPalette);
 
 let audioFile = null;
 let audioBuffer = null;
@@ -68,10 +75,6 @@ let isPlaying = false;
 let playStartTime = 0;
 let playOffset = 0;
 
-/** @type {{ id: string, name: string, img: HTMLImageElement, palette: object[], revoke: () => void }[]} */
-let savedImages = [];
-let activeImageId = null;
-
 const ACCEPTED_EXTENSIONS = /\.(mp3|wav)$/i;
 const ACCEPTED_MIME_TYPES = new Set([
   'audio/mpeg',
@@ -81,16 +84,10 @@ const ACCEPTED_MIME_TYPES = new Set([
   'audio/x-wav',
 ]);
 
-const IMAGE_TYPES = /^image\//;
-
 function isAcceptedAudioFile(file) {
   if (!file) return false;
   if (ACCEPTED_EXTENSIONS.test(file.name)) return true;
   return ACCEPTED_MIME_TYPES.has(file.type);
-}
-
-function isImageFile(file) {
-  return file && (IMAGE_TYPES.test(file.type) || /\.(png|jpe?g|webp|gif)$/i.test(file.name));
 }
 
 function silentFrame() {
@@ -98,14 +95,14 @@ function silentFrame() {
 }
 
 setupDropzone();
-setupImageDropzone();
 fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
-imageInput.addEventListener('change', () => handleImages([...imageInput.files]));
 playBtn.addEventListener('click', togglePlay);
 stopBtn.addEventListener('click', stopPlayback);
 exportBtn.addEventListener('click', handleExport);
 
 setupMappingPanel();
+setupPaletteControls();
+applyActivePalette();
 setMappingMatrix(loadMappingMatrix());
 setViscosity(loadViscosity());
 viscositySlider.value = String(Math.round(loadViscosity() * 100));
@@ -115,26 +112,12 @@ initFromStorage();
 
 async function initFromStorage() {
   try {
-    activeImageId = localStorage.getItem(ACTIVE_IMAGE_KEY);
-    const storedImages = await loadAllImages();
-    for (const rec of storedImages.sort((a, b) => a.savedAt - b.savedAt)) {
-      const file = blobToFile(rec.blob, rec.name, rec.type);
-      await addImageRecord(rec.id, file, rec.palette, false);
-    }
-    syncActiveImage();
-    renderImageGallery();
-    updateImageCount();
-
     const storedAudio = await loadAudio();
     if (storedAudio) {
       fileNameEl.textContent = `${storedAudio.name} (saved)`;
       await processAudioFile(storedAudio, false);
     } else {
       await loadBundledAudio();
-    }
-
-    if (!savedImages.length) {
-      await loadBundledImage();
     }
   } catch (err) {
     console.warn('Could not restore saved files', err);
@@ -151,22 +134,9 @@ async function fetchAsFile(url, name, type) {
 async function loadBundledAudio() {
   try {
     const file = await fetchAsFile(BUNDLED_AUDIO_URL, BUNDLED_AUDIO_NAME, 'audio/wav');
-    fileNameEl.textContent = `${file.name} (bundled sample)`;
-    await processAudioFile(file, false);
+    await processAudioFile(file, false, `${file.name} (bundled sample)`);
   } catch (err) {
     console.warn('Bundled sample audio not available', err);
-  }
-}
-
-async function loadBundledImage() {
-  try {
-    const file = await fetchAsFile(BUNDLED_IMAGE_URL, BUNDLED_IMAGE_NAME, 'image/jpeg');
-    const palette = await extractPaletteFromFile(file);
-    await addImageRecord(BUNDLED_IMAGE_ID, file, palette, true);
-    setActiveImage(BUNDLED_IMAGE_ID);
-    updateImageCount();
-  } catch (err) {
-    console.warn('Bundled sample image not available', err);
   }
 }
 
@@ -184,20 +154,6 @@ function setupDropzone() {
   });
 }
 
-function setupImageDropzone() {
-  imageDropzone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    imageDropzone.classList.add('dragover');
-  });
-  imageDropzone.addEventListener('dragleave', () => imageDropzone.classList.remove('dragover'));
-  imageDropzone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    imageDropzone.classList.remove('dragover');
-    const files = [...e.dataTransfer.files].filter(isImageFile);
-    if (files.length) handleImages(files);
-  });
-}
-
 async function handleFile(file) {
   if (!isAcceptedAudioFile(file)) {
     alert('Please select an MP3 or WAV file.');
@@ -206,7 +162,7 @@ async function handleFile(file) {
   await processAudioFile(file, true);
 }
 
-async function processAudioFile(file, persist) {
+async function processAudioFile(file, persist, displayName) {
   stopPlayback();
   resetState(false);
   setUploadProgress(0, 'Starting…');
@@ -215,7 +171,7 @@ async function processAudioFile(file, persist) {
 
   try {
     audioFile = file;
-    fileNameEl.textContent = persist ? file.name : `${file.name} (saved)`;
+    fileNameEl.textContent = displayName ?? (persist ? file.name : `${file.name} (saved)`);
 
     const onUploadProgress = (pct, label) => setUploadProgress(pct, label);
 
@@ -225,7 +181,6 @@ async function processAudioFile(file, persist) {
     analysis = await analyzeAudioBuffer(audioBuffer, onUploadProgress);
 
     resetRenderer(canvas.width, canvas.height);
-    syncActiveImage();
     resetLiveBeatState();
     drawBackdrop(ctx);
 
@@ -242,96 +197,6 @@ async function processAudioFile(file, persist) {
   } finally {
     dropzone.classList.remove('loading');
     setTimeout(() => showUploadProgress(false), 1200);
-  }
-}
-
-async function handleImages(files) {
-  const images = files.filter(isImageFile);
-  if (!images.length) {
-    alert('Please select image files (PNG, JPG, WebP, GIF).');
-    return;
-  }
-
-  imageDropzone.classList.add('loading');
-  let lastId = null;
-  try {
-    for (const file of images) {
-      const palette = await extractPaletteFromFile(file);
-      const record = await saveImage(file, palette);
-      await addImageRecord(record.id, file, palette, true);
-      lastId = record.id;
-    }
-    if (!activeImageId || !savedImages.some((x) => x.id === activeImageId)) {
-      setActiveImage(lastId ?? savedImages[0]?.id);
-    } else {
-      syncActiveImage();
-      renderImageGallery();
-      refreshCanvas();
-    }
-    updateImageCount();
-  } catch (err) {
-    console.error(err);
-    alert(`Could not process images: ${err.message}`);
-  } finally {
-    imageDropzone.classList.remove('loading');
-    imageInput.value = '';
-  }
-}
-
-async function addImageRecord(id, file, palette, isNew) {
-  const { img, revoke } = await fileToImageSource(file);
-  if (isNew) {
-    savedImages.push({ id, name: file.name, img, palette, revoke });
-  } else {
-    const existing = savedImages.find((x) => x.id === id);
-    existing?.revoke?.();
-    savedImages = savedImages.filter((x) => x.id !== id);
-    savedImages.push({ id, name: file.name, img, palette, revoke });
-  }
-}
-
-function setActiveImage(id) {
-  if (!savedImages.some((x) => x.id === id)) return;
-  activeImageId = id;
-  localStorage.setItem(ACTIVE_IMAGE_KEY, id);
-  syncActiveImage();
-  renderImageGallery();
-  refreshCanvas();
-}
-
-function syncActiveImage() {
-  const item = savedImages.find((x) => x.id === activeImageId) ?? savedImages[0];
-  if (item) {
-    activeImageId = item.id;
-    localStorage.setItem(ACTIVE_IMAGE_KEY, item.id);
-    setVisualizerImage(item.img);
-  } else {
-    setVisualizerImage(null);
-  }
-}
-
-async function removeImage(id) {
-  const item = savedImages.find((x) => x.id === id);
-  if (!item) return;
-  item.revoke?.();
-  savedImages = savedImages.filter((x) => x.id !== id);
-  await deleteImage(id);
-  if (activeImageId === id) {
-    activeImageId = savedImages[0]?.id ?? null;
-    if (activeImageId) localStorage.setItem(ACTIVE_IMAGE_KEY, activeImageId);
-    else localStorage.removeItem(ACTIVE_IMAGE_KEY);
-  }
-  syncActiveImage();
-  renderImageGallery();
-  updateImageCount();
-  refreshCanvas();
-}
-
-function refreshCanvas() {
-  if (audioBuffer && !isPlaying) drawIdleFrame();
-  else if (!audioBuffer) {
-    drawBackdrop(ctx);
-    drawFrame(ctx, silentFrame());
   }
 }
 
@@ -411,38 +276,64 @@ function setupMappingPanel() {
   renderMappingTable();
 }
 
-function renderImageGallery() {
-  imageGallery.innerHTML = savedImages
-    .map((item) => {
-      const active = item.id === activeImageId;
-      return `
-    <button type="button" class="gallery-item${active ? ' gallery-active' : ''}" data-select="${item.id}" title="${item.name}${active ? ' — active' : ''}">
-      <img src="${item.img.src}" alt="${item.name}" />
-      <span class="gallery-remove" data-remove="${item.id}" role="button" aria-label="Remove">✕</span>
-    </button>`;
+function getCustomColors() {
+  const baseKeys = new Set(POP_ART_COLORS.map(colorKey));
+  return fullPalette.filter((c) => !baseKeys.has(colorKey(c)));
+}
+
+function applyActivePalette() {
+  const active = getActivePalette(fullPalette, selectedPaletteIndices);
+  setVisualizerPalette(active);
+  if (audioBuffer && !isPlaying) drawIdleFrame();
+}
+
+function renderPaletteSwatches() {
+  paletteSwatches.innerHTML = fullPalette
+    .map((c, i) => {
+      const selected = selectedPaletteIndices.has(i);
+      const title = c.name ? `${c.name} (${c.r}, ${c.g}, ${c.b})` : `rgb(${c.r}, ${c.g}, ${c.b})`;
+      return `<button type="button" class="swatch${selected ? ' selected' : ''}" data-index="${i}" style="background: rgb(${c.r}, ${c.g}, ${c.b})" title="${title}" aria-label="${title}${selected ? ' — active' : ''}"></button>`;
     })
     .join('');
 
-  imageGallery.querySelectorAll('[data-select]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      if (e.target.closest('[data-remove]')) return;
-      setActiveImage(btn.dataset.select);
-    });
-  });
-
-  imageGallery.querySelectorAll('[data-remove]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      removeImage(btn.dataset.remove);
-    });
+  paletteSwatches.querySelectorAll('.swatch').forEach((btn) => {
+    btn.addEventListener('click', () => togglePaletteColor(Number(btn.dataset.index)));
   });
 }
 
-function updateImageCount() {
-  const n = savedImages.length;
-  imageCountEl.textContent = n
-    ? `${n} image${n > 1 ? 's' : ''} — click a thumbnail to pick the visual`
-    : 'No images yet';
+function togglePaletteColor(index) {
+  if (selectedPaletteIndices.has(index)) {
+    if (selectedPaletteIndices.size <= 1) return;
+    selectedPaletteIndices.delete(index);
+  } else {
+    selectedPaletteIndices.add(index);
+  }
+  saveSelectedIndices(fullPalette, selectedPaletteIndices);
+  applyActivePalette();
+  renderPaletteSwatches();
+}
+
+function setupPaletteControls() {
+  renderPaletteSwatches();
+
+  addColorBtn.addEventListener('click', () => {
+    const rgb = hexToRgb(colorPicker.value);
+    if (!rgb) return;
+
+    const key = colorKey(rgb);
+    const existing = fullPalette.findIndex((c) => colorKey(c) === key);
+    if (existing >= 0) {
+      selectedPaletteIndices.add(existing);
+    } else {
+      fullPalette.push(rgb);
+      selectedPaletteIndices.add(fullPalette.length - 1);
+      saveCustomColors(getCustomColors());
+    }
+
+    saveSelectedIndices(fullPalette, selectedPaletteIndices);
+    applyActivePalette();
+    renderPaletteSwatches();
+  });
 }
 
 function drawIdleFrame() {
@@ -516,7 +407,6 @@ function stopPlayback() {
   if (audioBuffer) {
     updateTimeDisplay(0, audioBuffer.duration);
     resetRenderer(canvas.width, canvas.height);
-    syncActiveImage();
     drawBackdrop(ctx);
     drawIdleFrame();
   }
@@ -611,7 +501,7 @@ function resetState(clearAudioLabel = true) {
   audioFile = null;
   audioBuffer = null;
   analysis = null;
-  if (clearAudioLabel) fileNameEl.textContent = 'No audio saved';
+  if (clearAudioLabel) fileNameEl.textContent = 'No audio loaded';
   playBtn.disabled = true;
   stopBtn.disabled = true;
   exportBtn.disabled = true;

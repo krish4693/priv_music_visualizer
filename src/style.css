@@ -330,12 +330,20 @@ button:not(:disabled):active {
   border-color: var(--accent);
 }
 
-.mapping-section {
+.mapping-section,
+.palette-section {
   margin: 1.5rem 0 0;
   padding: 1.25rem;
   border-radius: 12px;
   background: var(--surface);
   border: 1px solid var(--border);
+}
+
+.palette-section .palette-row {
+  margin-top: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
 }
 
 .mapping-header {

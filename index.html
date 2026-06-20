@@ -3,17 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Music Image Visualizer</title>
+    <title>Music Parameter Visualizer</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <div class="app">
       <header>
-        <h1>Music Image Visualizer</h1>
-        <p class="subtitle">Upload your image and music — the track warps, shifts, colors and glitches your picture in sync.</p>
+        <h1>Music Parameter Visualizer</h1>
+        <p class="subtitle">Route analyzed audio parameters (bass, mids, highs, volume, tempo) to generative 3D shapes — no image upload required.</p>
       </header>
 
-      <div class="upload-grid">
       <section class="upload-section">
         <p class="upload-label">Audio</p>
         <label class="dropzone" id="dropzone" for="file-input">
@@ -21,7 +20,7 @@
           <span class="dropzone-icon">♫</span>
           <span class="dropzone-text">Drop MP3 / WAV or click</span>
         </label>
-        <p class="file-name" id="file-name">No audio saved</p>
+        <p class="file-name" id="file-name">No audio loaded</p>
         <div class="progress-wrap" id="upload-progress-wrap" hidden>
           <p class="progress-heading">Upload &amp; analysis</p>
           <div class="progress-bar">
@@ -32,28 +31,16 @@
         </div>
       </section>
 
-      <section class="upload-section">
-        <p class="upload-label">Your image</p>
-        <label class="dropzone dropzone-images" id="image-dropzone" for="image-input">
-          <input type="file" id="image-input" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" multiple hidden />
-          <span class="dropzone-icon">🖼</span>
-          <span class="dropzone-text">Drop image(s) or click — click a thumbnail below to choose which one to visualize</span>
-        </label>
-        <p class="file-name" id="image-count">No images saved</p>
-        <div class="image-gallery" id="image-gallery"></div>
-      </section>
-      </div>
-
       <section class="mapping-section" id="mapping-section">
         <div class="mapping-header">
-          <span class="mapping-title">Effect mapping</span>
-          <span class="mapping-hint">Route audio to image effects — zoom, motion, color, glitch, wave, shape morph.</span>
+          <span class="mapping-title">Parameter mapping</span>
+          <span class="mapping-hint">Choose which analyzed audio signal drives each visual property.</span>
         </div>
         <div class="mapping-table-wrap">
           <table class="mapping-table" id="mapping-table">
             <thead>
               <tr>
-                <th>Image effect</th>
+                <th>Visual property</th>
                 <th>Audio source</th>
                 <th>Sensitivity</th>
               </tr>
@@ -63,15 +50,29 @@
         </div>
         <div class="mapping-controls">
           <label class="viscosity-control">
-            <span class="viscosity-label">Effect smoothing</span>
-            <span class="viscosity-hint">Lower = snappier reactions; higher = slower, fluid blends</span>
+            <span class="viscosity-label">Global viscosity</span>
+            <span class="viscosity-hint">Higher = slower, smoother response to music</span>
             <div class="viscosity-row">
-              <input type="range" id="viscosity-slider" min="0" max="100" step="1" value="35" aria-label="Effect smoothing" />
-              <span class="viscosity-val" id="viscosity-val">35%</span>
+              <input type="range" id="viscosity-slider" min="0" max="100" step="1" value="38" aria-label="Global viscosity" />
+              <span class="viscosity-val" id="viscosity-val">38%</span>
             </div>
           </label>
         </div>
         <button type="button" class="mapping-reset" id="mapping-reset">Reset to defaults</button>
+      </section>
+
+      <section class="palette-section">
+        <div class="palette-row" id="palette-row">
+          <div class="palette-header">
+            <span class="palette-label">Colors</span>
+            <span class="palette-hint">Click swatches to choose active colors</span>
+          </div>
+          <div class="palette-swatches" id="palette-swatches"></div>
+          <div class="palette-add">
+            <input type="color" id="color-picker" value="#00dcff" aria-label="Pick a custom color" />
+            <button type="button" id="add-color-btn">Add color</button>
+          </div>
+        </div>
       </section>
 
       <section class="canvas-section">
