@@ -14,6 +14,7 @@ import {
   flatMeshForPreset,
 } from './math3d.js';
 import { spreadSpinAxis, spreadDriftAxis } from './motionSpread.js';
+import { initSoftShapeMotion, updateSoftShapeMotion, syncSoftShapeMotionKind } from './roundShapeMotion.js';
 
 const WIDTH = 1280;
 const HEIGHT = 720;
@@ -325,7 +326,7 @@ export class PopArtScene {
 
       const z = (rng() - 0.5) * zRange * 2;
 
-      return {
+      const shape = {
         x: pos.x,
         y: pos.y,
         z,
@@ -361,6 +362,8 @@ export class PopArtScene {
         surpriseScale: 1,
         alpha: POP_ART_ALPHA,
       };
+      initSoftShapeMotion(rng, shape, preset.kind);
+      return shape;
     });
   }
 
@@ -406,6 +409,7 @@ export class PopArtScene {
       s.toRz = target.rz * s.sizeMul;
       s.toRound = target.round ?? 0;
       s.morphT = 0;
+      syncSoftShapeMotionKind(s, SHAPE_PRESETS[s.type]?.kind ?? 'box');
     }
   }
 
@@ -643,6 +647,7 @@ export class PopArtScene {
       if (this._prevFrameTime != null) dt = Math.max(1 / 120, Math.min(0.1, frame.time - this._prevFrameTime));
       this._prevFrameTime = frame.time;
     }
+    const motionDt = dt * (this.variation.animationSpeed ?? 1);
 
     const sources = extractAudioSources(frame, this.sourceState, dt);
     const raw = resolveMappedValues(sources, this.mappings);
@@ -667,7 +672,7 @@ export class PopArtScene {
     } else {
       this._updateColorVariation(sources, frame, dt);
     }
-    this._updateSurprises(sources, frame, dt);
+    this._updateSurprises(sources, frame, motionDt);
 
     const geo = this.damped.geometry;
     let mot = this.damped.motion;
@@ -711,9 +716,9 @@ export class PopArtScene {
         s.vy *= drag;
         s.vz *= drag;
 
-        s.x += s.vx * driftSpeed * dt;
-        s.y += s.vy * driftSpeed * dt;
-        s.z += s.vz * driftSpeed * dt * 0.85;
+        s.x += s.vx * driftSpeed * motionDt;
+        s.y += s.vy * driftSpeed * motionDt;
+        s.z += s.vz * driftSpeed * motionDt * 0.85;
 
         const pad = 220;
         if (s.x < -pad) s.x = this.width + pad;
@@ -724,15 +729,17 @@ export class PopArtScene {
         if (s.z < -zLimit) s.z = zLimit;
       }
 
-      s.rotX += s.rotSpeedX * rotRate * dt * s.surpriseSpinBoost;
-      s.rotY += s.rotSpeedY * rotRate * dt * s.surpriseSpinBoost;
-      s.rotZ += s.rotSpeedZ * rotRate * dt * s.surpriseSpinBoost;
+      s.rotX += s.rotSpeedX * rotRate * motionDt * s.surpriseSpinBoost;
+      s.rotY += s.rotSpeedY * rotRate * motionDt * s.surpriseSpinBoost;
+      s.rotZ += s.rotSpeedZ * rotRate * motionDt * s.surpriseSpinBoost;
 
-      s.morphT = Math.min(1, s.morphT + morphRate * dt);
+      s.morphT = Math.min(1, s.morphT + morphRate * motionDt);
       this._advanceMorph(s);
+      syncSoftShapeMotionKind(s, getShapeKind(s.morphT < 0.5 ? s.type : s.morphTarget));
+      updateSoftShapeMotion(s, mot, motionDt);
     }
 
-    this._updateTitle(frame, dt);
+    this._updateTitle(frame, motionDt);
     this._snapshotLiveAnalysis(sources, raw, frame, geo, mot, morph);
   }
 
@@ -746,7 +753,7 @@ export class PopArtScene {
 
     let round = 0;
     if (rounded) {
-      if (kind === 'ellipsoid') {
+      if (kind === 'ellipsoid' || kind === 'egg') {
         round = Math.min(1, lerp(s.fromRound, s.toRound, t));
       } else {
         round = cornerAmt * 0.55;
@@ -755,9 +762,9 @@ export class PopArtScene {
 
     return {
       kind,
-      rx: lerp(s.fromRx, s.toRx, t) * sizeScale,
-      ry: lerp(s.fromRy, s.toRy, t) * sizeScale,
-      rz: lerp(s.fromRz, s.toRz, t) * sizeScale,
+      rx: lerp(s.fromRx, s.toRx, t) * sizeScale * (s.squashX ?? 1),
+      ry: lerp(s.fromRy, s.toRy, t) * sizeScale * (s.squashY ?? 1),
+      rz: lerp(s.fromRz, s.toRz, t) * sizeScale * (s.squashZ ?? 1),
       round,
       roundedEdges: rounded,
     };
@@ -794,8 +801,12 @@ export class PopArtScene {
     const h = this.height;
     const params = this._shapeRenderParams(s);
     const mesh = this._meshForShape(params);
-    const offset = [s.x - w / 2, s.y - h / 2, s.z];
-    const rot = [s.rotX, s.rotY, s.rotZ];
+    const offset = [
+      s.x - w / 2 + (s.wobbleX ?? 0),
+      s.y - h / 2 + (s.wobbleY ?? 0),
+      s.z + (s.wobbleZ ?? 0),
+    ];
+    const rot = [s.rotX + (s.tiltX ?? 0), s.rotY, s.rotZ + (s.tiltZ ?? 0)];
     const colorIdx = this._effectiveColorIdx(s);
     const colorBlend = colorIdx - Math.floor(colorIdx);
     const baseFill = popArtColor(this.palette, colorIdx, colorBlend, 1);

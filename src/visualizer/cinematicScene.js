@@ -10,6 +10,7 @@ import { CameraRig } from './three/cameraRig.js';
 import { createPostPipeline, resizePostPipeline, disposePostPipeline, applyPostSettings, updatePostTime } from './three/postPipeline.js';
 import { loadCinematicSettings, normalizeCinematicSettings } from './cinematicSettingsStore.js';
 import { spreadSpinAxis, spreadDriftAxis } from './motionSpread.js';
+import { initSoftShapeMotion, updateSoftShapeMotion, syncSoftShapeMotionKind } from './roundShapeMotion.js';
 import { CinematicTitleGroup } from './three/cinematicTitle.js';
 import { titleTimingFromFrequency } from './titleStore.js';
 
@@ -109,6 +110,7 @@ export class CinematicScene {
     this._automationSample = null;
     this._surpriseRush = 1;
     this._sceneTime = 0;
+    this._motionTime = 0;
     this.cinematicSettings = normalizeCinematicSettings(loadCinematicSettings());
 
     this._initThree();
@@ -239,6 +241,7 @@ export class CinematicScene {
 
   _applyBackgroundColor(color) {
     const c = hexToThree(color);
+    this._threeScene.background = c;
     this._renderer.setClearColor(c, 1);
     if (this._threeScene.fog instanceof THREE.FogExp2) {
       this._threeScene.fog.color.copy(c);
@@ -389,6 +392,7 @@ export class CinematicScene {
 
   resetPlayhead() {
     this._prevFrameTime = null;
+    this._motionTime = 0;
     resetAudioSourceState(this.sourceState);
     this.damped = { geometry: 0, color: 0, motion: 0, morphing: 0 };
   }
@@ -435,6 +439,40 @@ export class CinematicScene {
     return options[Math.floor(rng() * options.length)];
   }
 
+  _enforceEnabledTypes(s) {
+    const enabled = new Set(this._enabledShapeIds());
+    if (enabled.has(s.type) && enabled.has(s.morphTarget)) return;
+
+    if (!enabled.has(s.type)) {
+      s.type = this._pickNextType(s.type);
+    }
+    if (!enabled.has(s.morphTarget)) {
+      s.morphTarget = this._pickNextType(s.type);
+    }
+  }
+
+  _activeShapeType(s) {
+    return s.morphT < 0.5 ? s.type : s.morphTarget;
+  }
+
+  _updateMeshGeometryForShape(s) {
+    const mesh = this._meshByShape.get(s);
+    if (!mesh) return;
+    const activeType = this._activeShapeType(s);
+    mesh.geometry.dispose();
+    mesh.geometry = geometryForShapeType(activeType, s.sizeMul);
+  }
+
+  _advanceMorph(s) {
+    if (s.morphT < 1) return;
+    s.type = s.morphTarget;
+    s.morphTarget = this._pickNextType(s.type);
+    this._enforceEnabledTypes(s);
+    s.morphT = 0;
+    syncSoftShapeMotionKind(s, SHAPE_PRESETS[s.type]?.kind ?? 'box');
+    this._updateMeshGeometryForShape(s);
+  }
+
   _initShapes(width, height) {
     const rng = this.rng;
     const count = Math.min(MAX_SHAPES, Math.max(MIN_SHAPES, this.variation.shapeCount));
@@ -454,7 +492,7 @@ export class CinematicScene {
       const spinMul = 0.35 + spin * 0.85;
       const z = (rng() - 0.5) * zRange * 2;
 
-      return {
+      const shape = {
         x: pos.x,
         y: pos.y,
         z,
@@ -480,6 +518,8 @@ export class CinematicScene {
         surpriseSpinBoost: 1,
         surpriseScale: 1,
       };
+      initSoftShapeMotion(rng, shape, SHAPE_PRESETS[type]?.kind ?? 'box');
+      return shape;
     });
   }
 
@@ -502,7 +542,7 @@ export class CinematicScene {
     for (let i = 0; i < this.shapes.length; i++) {
       const s = this.shapes[i];
       const color = paletteColorThree(this.palette, s.colorIdx + this.colorOffset);
-      const geo = geometryForShapeType(s.type, s.sizeMul);
+      const geo = geometryForShapeType(this._activeShapeType(s), s.sizeMul);
       const mat = cinematicMaterial(color, this._materialOpts());
       const mesh = new THREE.Mesh(geo, mat);
       mesh.castShadow = true;
@@ -521,11 +561,22 @@ export class CinematicScene {
     for (const s of this.shapes) {
       const mesh = this._meshByShape.get(s);
       if (!mesh) continue;
-      const w = screenToWorld(s.x, s.y, s.z, this.width, this.height);
+      const w = screenToWorld(
+        s.x + (s.wobbleX ?? 0),
+        s.y + (s.wobbleY ?? 0),
+        s.z + (s.wobbleZ ?? 0),
+        this.width,
+        this.height,
+      );
       mesh.position.set(w.x, w.y, w.z);
-      mesh.rotation.set(s.rotX, s.rotY, s.rotZ);
+      mesh.rotation.set(s.rotX + (s.tiltX ?? 0), s.rotY, s.rotZ + (s.tiltZ ?? 0));
       const sc = s.scale * (s.surpriseScale ?? 1);
-      mesh.scale.set(sc, sc, sc);
+      const preset = SHAPE_PRESETS[this._activeShapeType(s)];
+      let scaleX = sc * (s.squashX ?? 1);
+      let scaleY = sc * (s.squashY ?? 1);
+      let scaleZ = sc * (s.squashZ ?? 1);
+      if (preset?.kind === 'torus') scaleZ *= preset.rz / preset.rx;
+      mesh.scale.set(scaleX, scaleY, scaleZ);
     }
   }
 
@@ -581,6 +632,8 @@ export class CinematicScene {
       this._prevFrameTime = frame.time;
       this._sceneTime = frame.time;
     }
+    const motionDt = dt * (this.variation.animationSpeed ?? 1);
+    this._motionTime += motionDt;
 
     const sources = extractAudioSources(frame, this.sourceState, dt);
     const raw = resolveMappedValues(sources, this.mappings);
@@ -644,9 +697,9 @@ export class CinematicScene {
         s.vx *= drag;
         s.vy *= drag;
         s.vz *= drag;
-        s.x += s.vx * driftSpeed * dt;
-        s.y += s.vy * driftSpeed * dt;
-        s.z += s.vz * driftSpeed * dt * 0.85;
+        s.x += s.vx * driftSpeed * motionDt;
+        s.y += s.vy * driftSpeed * motionDt;
+        s.z += s.vz * driftSpeed * motionDt * 0.85;
 
         const pad = 220;
         if (s.x < -pad) s.x = this.width + pad;
@@ -657,14 +710,22 @@ export class CinematicScene {
         if (s.z < -zLimit) s.z = zLimit;
       }
 
-      s.rotX += s.rotSpeedX * rotRate * dt * (s.surpriseSpinBoost ?? 1);
-      s.rotY += s.rotSpeedY * rotRate * dt * (s.surpriseSpinBoost ?? 1);
-      s.rotZ += s.rotSpeedZ * rotRate * dt * (s.surpriseSpinBoost ?? 1);
-      s.morphT = Math.min(1, s.morphT + (0.015 + morph * 0.07) * dt);
+      s.rotX += s.rotSpeedX * rotRate * motionDt * (s.surpriseSpinBoost ?? 1);
+      s.rotY += s.rotSpeedY * rotRate * motionDt * (s.surpriseSpinBoost ?? 1);
+      s.rotZ += s.rotSpeedZ * rotRate * motionDt * (s.surpriseSpinBoost ?? 1);
+      s.morphT = Math.min(1, s.morphT + (0.015 + morph * 0.07) * motionDt);
+      const prevActive = this._activeShapeType(s);
+      this._advanceMorph(s);
+      const nextActive = this._activeShapeType(s);
+      if (prevActive !== nextActive) {
+        this._updateMeshGeometryForShape(s);
+      }
+      syncSoftShapeMotionKind(s, SHAPE_PRESETS[this._activeShapeType(s)]?.kind ?? 'box');
+      updateSoftShapeMotion(s, mot, motionDt);
     }
 
-    this._cameraRig.update(this._sceneTime, mot);
-    this._updateTitle(frame, dt);
+    this._cameraRig.update(this._motionTime, mot);
+    this._updateTitle(frame, motionDt);
     this._applyShapeTransforms();
     this._snapshotLiveAnalysis(sources, raw, frame, geo, mot, morph);
   }
@@ -682,8 +743,15 @@ export class CinematicScene {
   }
 
   draw(ctx) {
-    updatePostTime(this._post, this._sceneTime);
-    this._post.composer.render();
+    updatePostTime(this._post, this._motionTime);
+    // EffectComposer output does not reach the default framebuffer when blitting
+    // WebGL into the 2D preview canvas — render the scene directly instead.
+    this._renderer.setRenderTarget(null);
+    this._renderer.clear(true, true, true);
+    this._renderer.render(this._threeScene, this._camera);
+    const gl = this._renderer.getContext();
+    gl.finish();
+
     ctx.drawImage(this._renderer.domElement, 0, 0, this.width, this.height);
     this._drawLetterbox(ctx);
   }

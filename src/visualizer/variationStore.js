@@ -2,6 +2,14 @@ export const VARIATION_STORAGE_KEY = 'visualizer-popart-variation-v1';
 
 export { SHAPE_OPTIONS } from './shapePresets.js';
 
+export const ANIMATION_SPEEDS = [
+  { value: 0.25, label: '¼×' },
+  { value: 0.5, label: '½×' },
+  { value: 1, label: '1×' },
+  { value: 2, label: '2×' },
+  { value: 4, label: '4×' },
+];
+
 export const COLOR_MODES = [
   { id: 'manual', label: 'Manual — palette only' },
   { id: 'tempo', label: 'Tempo — follows song BPM' },
@@ -31,6 +39,7 @@ export const COLOR_MODES = [
  * @property {boolean} kanten
  * @property {number} cornerRound
  * @property {boolean} fixedLayout
+ * @property {number} animationSpeed
  */
 
 /** @type {VariationSettings} */
@@ -53,7 +62,15 @@ export const DEFAULT_VARIATION = {
   kanten: false,
   cornerRound: 50,
   fixedLayout: true,
+  animationSpeed: 1,
 };
+
+const VALID_ANIMATION_SPEEDS = new Set(ANIMATION_SPEEDS.map((s) => s.value));
+
+function normalizeAnimationSpeed(value) {
+  const n = Number(value);
+  return VALID_ANIMATION_SPEEDS.has(n) ? n : DEFAULT_VARIATION.animationSpeed;
+}
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
@@ -84,6 +101,7 @@ export function cloneVariation(v) {
     kanten: !!v.kanten,
     cornerRound: v.cornerRound,
     fixedLayout: v.fixedLayout !== false,
+    animationSpeed: normalizeAnimationSpeed(v.animationSpeed),
   };
 }
 
@@ -123,6 +141,7 @@ export function loadVariation() {
       kanten: parsed.kanten !== false,
       cornerRound: clamp(Number(parsed.cornerRound) ?? DEFAULT_VARIATION.cornerRound, 0, 100),
       fixedLayout: parsed.fixedLayout !== false,
+      animationSpeed: normalizeAnimationSpeed(parsed.animationSpeed),
     };
   } catch {
     return cloneVariation(DEFAULT_VARIATION);

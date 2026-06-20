@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const VignetteShader = {
   uniforms: {
@@ -106,7 +107,10 @@ export function createPostPipeline(renderer, scene, camera, width, height, setti
   const grain = new ShaderPass(FilmGrainShader);
   composer.addPass(grain);
 
-  const pipeline = { composer, bloom, vignette, grain, time: 0 };
+  const output = new OutputPass();
+  composer.addPass(output);
+
+  const pipeline = { composer, bloom, vignette, grain, output, time: 0 };
   applyPostSettings(pipeline, settings);
   return pipeline;
 }

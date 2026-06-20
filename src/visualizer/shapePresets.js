@@ -1,4 +1,4 @@
-/** @typedef {'box'|'ellipsoid'|'pyramid'|'octahedron'|'cone'|'cylinder'|'prism'|'tetrahedron'|'torus'} ShapeKind */
+/** @typedef {'box'|'ellipsoid'|'egg'|'pyramid'|'octahedron'|'cone'|'cylinder'|'prism'|'tetrahedron'|'torus'} ShapeKind */
 
 /**
  * @typedef {Object} ShapePreset
@@ -13,6 +13,7 @@ export const SHAPE_OPTIONS = [
   { id: 'rectangle', label: 'Rectangle' },
   { id: 'cube', label: 'Cube' },
   { id: 'oval', label: 'Oval' },
+  { id: 'egg', label: 'Egg' },
   { id: 'pillar', label: 'Pillar' },
   { id: 'pyramid', label: 'Pyramid' },
   { id: 'diamond', label: 'Diamond' },
@@ -28,6 +29,7 @@ export const SHAPE_PRESETS = {
   rectangle: { kind: 'box', rx: 210, ry: 78, rz: 52, round: 0.04 },
   cube: { kind: 'box', rx: 105, ry: 105, rz: 105, round: 0.06 },
   oval: { kind: 'ellipsoid', rx: 135, ry: 92, rz: 88, round: 1 },
+  egg: { kind: 'egg', rx: 105, ry: 138, rz: 98, round: 1 },
   pillar: { kind: 'box', rx: 68, ry: 145, rz: 68, round: 0.08 },
   pyramid: { kind: 'pyramid', rx: 130, ry: 155, rz: 130, round: 0 },
   diamond: { kind: 'octahedron', rx: 118, ry: 150, rz: 118, round: 0 },

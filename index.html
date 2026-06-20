@@ -11,77 +11,50 @@
     <div class="app">
       <header class="app-header">
         <h1>Music Parameter Visualizer</h1>
-        <p class="subtitle">Live preview while you tweak — parameters surround the video.</p>
       </header>
 
       <div class="studio">
-        <!-- TOP: audio, title, colors -->
+        <!-- TOP: shapes, audio, colors -->
         <aside class="panel panel-top">
-          <section class="shapes-bar panel-inner">
-            <div class="shapes-bar-head">
-              <span class="variation-group-label">Shape types</span>
-                <div class="config-toolbar">
+          <section class="shapes-bar panel-inner shapes-bar-compact">
+            <div class="shapes-bar-toolbar">
+              <span class="variation-group-label shapes-bar-label">Shape types</span>
+              <label class="dropzone-mini" id="dropzone" for="file-input">
+                <input type="file" id="file-input" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,.mp3,.wav" hidden />
+                <span class="dropzone-icon">♫</span>
+                <span class="dropzone-text">MP3 / WAV</span>
+              </label>
+              <p class="file-name file-name-inline" id="file-name">No audio loaded</p>
+              <div class="config-toolbar">
                 <button type="button" class="config-save-btn" id="save-config-btn">Save config</button>
                 <button type="button" class="config-open-btn" id="open-config-btn">Open config</button>
                 <input type="file" id="open-config-input" accept=".mviz.json,.json,.vtake" hidden aria-hidden="true" />
                 <span class="config-status" id="config-status" hidden></span>
               </div>
             </div>
-            <div class="shape-toggles shape-toggles-always" id="shape-toggles"></div>
-          </section>
-
-          <section class="upload-section panel-inner">
-            <div class="upload-top-row">
-              <div class="upload-audio">
-                <p class="upload-label">Audio</p>
-                <label class="dropzone dropzone-compact" id="dropzone" for="file-input">
-                  <input type="file" id="file-input" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,.mp3,.wav" hidden />
-                  <span class="dropzone-icon">♫</span>
-                  <span class="dropzone-text">Drop MP3 / WAV or click</span>
-                </label>
-                <p class="file-name" id="file-name">No audio loaded</p>
-              </div>
-              <label class="title-field title-field-compact">
-                <span class="title-field-label">Song title</span>
-                <input type="text" id="song-title-input" maxlength="80" placeholder="Track title" autocomplete="off" />
-                <label class="title-frequency">
-                  <span class="title-frequency-label">Title frequency</span>
-                  <div class="title-frequency-row">
-                    <input type="range" id="title-frequency-slider" min="0" max="100" step="1" aria-label="Title appearance frequency" />
-                    <span class="title-frequency-val" id="title-frequency-val">45%</span>
-                  </div>
-                </label>
-              </label>
-            </div>
-            <div class="progress-wrap" id="upload-progress-wrap" hidden>
-              <p class="progress-heading">Upload &amp; analysis</p>
-              <div class="progress-bar">
-                <div class="progress-fill upload-fill" id="upload-progress-fill"></div>
-              </div>
-              <p class="progress-label" id="upload-progress-label">Reading file…</p>
-              <p class="progress-percent" id="upload-progress-percent">0%</p>
-            </div>
-          </section>
-
-          <section class="palette-section panel-inner">
-            <div class="palette-row" id="palette-row">
-              <div class="palette-header">
+            <div class="shapes-bar-body">
+              <div class="shape-toggles shape-toggles-always" id="shape-toggles"></div>
+              <div class="palette-in-shapes" id="palette-row">
                 <span class="palette-label">Colors</span>
-                <span class="palette-hint">Click swatches to activate</span>
-              </div>
-              <div class="palette-swatches" id="palette-swatches"></div>
-              <div class="palette-actions">
-                <div class="palette-add">
-                  <input type="color" id="color-picker" value="#00dcff" aria-label="Pick a custom color" />
-                  <button type="button" id="add-color-btn">Add color</button>
-                </div>
-                <div class="palette-bg">
-                  <label class="bg-color-label">
-                    <span>Background</span>
+                <div class="palette-swatches" id="palette-swatches"></div>
+                <div class="palette-actions palette-actions-inline">
+                  <div class="palette-add">
+                    <input type="color" id="color-picker" value="#00dcff" aria-label="Pick a custom color" />
+                    <button type="button" id="add-color-btn">Add</button>
+                  </div>
+                  <label class="bg-color-label bg-color-inline">
+                    <span>BG</span>
                     <input type="color" id="bg-color-picker" value="#1c1c1e" aria-label="Background color" />
                   </label>
                 </div>
               </div>
+            </div>
+            <div class="progress-wrap progress-wrap-inline" id="upload-progress-wrap" hidden>
+              <div class="progress-bar progress-bar-inline">
+                <div class="progress-fill upload-fill" id="upload-progress-fill"></div>
+              </div>
+              <span class="progress-label progress-label-inline" id="upload-progress-label">Reading file…</span>
+              <span class="progress-percent progress-percent-inline" id="upload-progress-percent">0%</span>
             </div>
           </section>
         </aside>
@@ -146,6 +119,7 @@
               <button id="record-btn" disabled title="Record parameter changes while playing">Record</button>
               <button type="button" id="clear-automation-btn" disabled title="Delete recording">Clear</button>
               <span class="automation-status" id="automation-status"></span>
+              <div class="speed-control" id="speed-control" role="group" aria-label="Motion speed"></div>
               <span id="time-display">0:00 / 0:00</span>
             </div>
             <p class="take-note">Record while playing · save everything with <strong>Save config</strong></p>
@@ -265,6 +239,11 @@
                   <input type="range" id="depth-range-slider" min="0" max="100" step="1" aria-label="Depth range" />
                   <span class="variation-val" id="depth-range-val">45%</span>
                 </div>
+              </label>
+              <label class="variation-field variation-field-full">
+                <span class="variation-field-label">Motion speed</span>
+                <div class="speed-control speed-control-panel" id="speed-control-panel" role="group" aria-label="Motion speed"></div>
+                <p class="variation-hint">Music stays at normal speed — only shape movement and rotation change.</p>
               </label>
               <label class="variation-field variation-field-full">
                 <label class="manual-speed-toggle">

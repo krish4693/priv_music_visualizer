@@ -3,7 +3,6 @@ import { CinematicScene } from './cinematicScene.js';
 import { loadMappingMatrix, cloneMappings, loadViscosity } from './mappingMatrix.js';
 import { loadVariation, cloneVariation } from './variationStore.js';
 import { loadBackgroundColor, DEFAULT_BG } from './backgroundStore.js';
-import { loadSongTitle, loadTitleFrequency } from './titleStore.js';
 import { loadRendererMode, saveRendererMode, RENDERER_MODES } from './rendererModeStore.js';
 import {
   loadCinematicSettings,
@@ -26,8 +25,8 @@ let currentViscosity = loadViscosity();
 let currentVariation = loadVariation();
 let currentPalette = null;
 let currentBackground = loadBackgroundColor();
-let currentSongTitle = loadSongTitle();
-let currentTitleFrequency = loadTitleFrequency();
+let currentSongTitle = '';
+let currentTitleFrequency = 0;
 let currentCinematicSettings = loadCinematicSettings();
 const playbackAutomation = new AutomationRecorder();
 /** @type {string|null} */

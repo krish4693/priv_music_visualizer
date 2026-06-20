@@ -14,8 +14,6 @@ import {
   setVariationSettings,
   regenerateVariation,
   setBackgroundColor,
-  setSongTitle,
-  setTitleFrequency,
   getRendererMode,
   setRendererMode,
   RENDERER_MODES,
@@ -53,6 +51,7 @@ import {
 import {
   SHAPE_OPTIONS,
   COLOR_MODES,
+  ANIMATION_SPEEDS,
   DEFAULT_VARIATION,
   loadVariation,
   saveVariation,
@@ -61,7 +60,6 @@ import {
 import { AutomationRecorder } from './visualizer/automationStore.js';
 import { buildAppConfig, downloadAppConfig, parseAppConfig, suggestConfigFilename } from './visualizer/configStore.js';
 import { loadBackgroundColor, saveBackgroundColor } from './visualizer/backgroundStore.js';
-import { loadSongTitle, saveSongTitle, titleFromFilename, loadTitleFrequency, saveTitleFrequency } from './visualizer/titleStore.js';
 import {
   CINEMATIC_SLIDERS,
   DEFAULT_CINEMATIC_SETTINGS,
@@ -74,9 +72,6 @@ const BUNDLED_AUDIO_NAME = '02 AboudVsFlab.wav';
 const fileInput = document.getElementById('file-input');
 const dropzone = document.getElementById('dropzone');
 const fileNameEl = document.getElementById('file-name');
-const songTitleInput = document.getElementById('song-title-input');
-const titleFrequencySlider = document.getElementById('title-frequency-slider');
-const titleFrequencyVal = document.getElementById('title-frequency-val');
 const canvas = document.getElementById('visualizer');
 const playBtn = document.getElementById('play-btn');
 const stopBtn = document.getElementById('stop-btn');
@@ -92,6 +87,8 @@ const clipToInput = document.getElementById('clip-to');
 const previewExportBtn = document.getElementById('preview-export-btn');
 const automationStatus = document.getElementById('automation-status');
 const timeDisplay = document.getElementById('time-display');
+const speedControl = document.getElementById('speed-control');
+const speedControlPanel = document.getElementById('speed-control-panel');
 const exportBtn = document.getElementById('export-btn');
 const uploadProgressWrap = document.getElementById('upload-progress-wrap');
 const uploadProgressFill = document.getElementById('upload-progress-fill');
@@ -206,16 +203,10 @@ previewExportBtn?.addEventListener('click', () => handleExport(true));
 mappingPanel = setupMappingPanel();
 setupPaletteControls();
 setupBackgroundControl();
-setupSongTitleControl();
 variationController = setupVariationPanel();
 applyActivePalette();
 setBackgroundColor(loadBackgroundColor());
 bgColorPicker.value = loadBackgroundColor();
-setSongTitle(loadSongTitle());
-setTitleFrequency(loadTitleFrequency());
-songTitleInput.value = loadSongTitle();
-titleFrequencySlider.value = String(loadTitleFrequency());
-titleFrequencyVal.textContent = `${loadTitleFrequency()}%`;
 setMappingMatrix(loadMappingMatrix());
 setViscosity(loadViscosity());
 setVariationSettings(loadVariation());
@@ -293,15 +284,6 @@ async function processAudioFile(file, persist, displayName, { quiet = false } = 
     audioFile = file;
     fileNameEl.textContent = displayName ?? (persist ? file.name : `${file.name} (saved)`);
 
-    if (!songTitleInput.value.trim()) {
-      const suggested = titleFromFilename(file.name);
-      if (suggested) {
-        songTitleInput.value = suggested;
-        saveSongTitle(suggested);
-        setSongTitle(suggested);
-      }
-    }
-
     const onUploadProgress = (pct, label) => setUploadProgress(pct, label);
 
     if (persist) await saveAudio(file);
@@ -364,8 +346,6 @@ function collectCurrentLook() {
     mappings: mappingPanel?.getMappings() ?? loadMappingMatrix(),
     viscosity: mappingPanel?.getViscosity() ?? loadViscosity(),
     bgColor: loadBackgroundColor(),
-    title: loadSongTitle(),
-    titleFrequency: loadTitleFrequency(),
     palette: snapshotPaletteForAutomation(),
     cinematic: getCinematicSettings(),
   };
@@ -387,15 +367,6 @@ function applyLookSettings(look) {
   saveBackgroundColor(look.bgColor);
   setBackgroundColor(look.bgColor);
   bgColorPicker.value = look.bgColor;
-
-  saveSongTitle(look.title);
-  setSongTitle(look.title);
-  songTitleInput.value = look.title;
-
-  saveTitleFrequency(look.titleFrequency);
-  setTitleFrequency(look.titleFrequency);
-  titleFrequencySlider.value = String(look.titleFrequency);
-  titleFrequencyVal.textContent = `${look.titleFrequency}%`;
 
   const paletteState = applyPalettePreset(look.palette);
   fullPalette = paletteState.fullPalette;
@@ -1041,22 +1012,6 @@ function setupBackgroundControl() {
   });
 }
 
-function setupSongTitleControl() {
-  songTitleInput.addEventListener('input', () => {
-    saveSongTitle(songTitleInput.value);
-    setSongTitle(songTitleInput.value);
-    refreshPreview();
-  });
-
-  titleFrequencySlider.addEventListener('input', () => {
-    const val = Number(titleFrequencySlider.value);
-    titleFrequencyVal.textContent = `${val}%`;
-    saveTitleFrequency(val);
-    setTitleFrequency(val);
-    refreshPreview();
-  });
-}
-
 function setupVariationPanel() {
   let variation = loadVariation();
   let regenerateOnNextApply = false;
@@ -1076,6 +1031,29 @@ function setupVariationPanel() {
     manualSpeedSlider.disabled = !variation.manualSpeed;
     surpriseRateSlider.disabled = !variation.surprises;
     cornerRoundSlider.disabled = !variation.roundedEdges;
+  }
+
+  function renderSpeedControls() {
+    const speed = variation.animationSpeed ?? 1;
+    const html = ANIMATION_SPEEDS.map(({ value, label }) =>
+      `<button type="button" class="speed-btn${speed === value ? ' active' : ''}" data-speed="${value}" aria-pressed="${speed === value}">${label}</button>`,
+    ).join('');
+
+    for (const root of [speedControl, speedControlPanel]) {
+      if (!root) continue;
+      root.innerHTML = html;
+      root.querySelectorAll('.speed-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const next = Number(btn.dataset.speed);
+          if (next === variation.animationSpeed) return;
+          variation.animationSpeed = next;
+          saveVariation(variation);
+          setVariationSettings(variation);
+          renderSpeedControls();
+          refreshPreview();
+        });
+      });
+    }
   }
 
   function renderShapeToggles() {
@@ -1161,6 +1139,7 @@ function setupVariationPanel() {
   cornerRoundSlider.value = String(variation.cornerRound);
   renderColorModeSelect();
   renderShapeToggles();
+  renderSpeedControls();
   syncSliderLabels();
 
   function syncVariationUI() {
@@ -1184,6 +1163,7 @@ function setupVariationPanel() {
     colorModeSelect.value = variation.colorMode;
     renderColorModeSelect();
     renderShapeToggles();
+    renderSpeedControls();
     syncSliderLabels();
   }
 

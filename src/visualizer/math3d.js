@@ -338,6 +338,49 @@ export function buildTorusMesh(rx, ry, rz, uSeg = 18, vSeg = 12) {
   return faces;
 }
 
+/** Egg — wider bottom, narrower top; rx/rz = girth, ry = height. */
+export function buildEggMesh(rx, ry, rz, uSeg = 18, vSeg = 14) {
+  const verts = [];
+
+  for (let vi = 0; vi <= vSeg; vi++) {
+    const row = [];
+    const phi = (vi / vSeg) * Math.PI;
+    const sinP = Math.sin(phi);
+    const cosP = Math.cos(phi);
+    const widthMul = 0.72 + 0.38 * Math.pow(sinP, 0.55);
+    const erx = rx * widthMul;
+    const erz = rz * widthMul;
+    for (let ui = 0; ui <= uSeg; ui++) {
+      const theta = (ui / uSeg) * Math.PI * 2;
+      row.push([
+        erx * sinP * Math.cos(theta),
+        ry * cosP,
+        erz * sinP * Math.sin(theta),
+      ]);
+    }
+    verts.push(row);
+  }
+
+  const faces = [];
+  for (let vi = 0; vi < vSeg; vi++) {
+    for (let ui = 0; ui < uSeg; ui++) {
+      const a = verts[vi][ui];
+      const b = verts[vi][ui + 1];
+      const c = verts[vi + 1][ui + 1];
+      const d = verts[vi + 1][ui];
+      const cx = (a[0] + b[0] + c[0] + d[0]) / 4 / (rx || 1);
+      const cy = (a[1] + b[1] + c[1] + d[1]) / 4 / (ry || 1);
+      const cz = (a[2] + b[2] + c[2] + d[2]) / 4 / (rz || 1);
+      const len = Math.hypot(cx, cy, cz) || 1;
+      faces.push({
+        verts: [a, b, c, d],
+        normal: [cx / len, cy / len, cz / len],
+      });
+    }
+  }
+  return faces;
+}
+
 /**
  * @param {import('./shapePresets.js').ShapeKind} kind
  */
@@ -345,6 +388,8 @@ export function meshForPreset(kind, rx, ry, rz, round = 0) {
   switch (kind) {
     case 'ellipsoid':
       return buildEllipsoidMesh(rx, ry, rz);
+    case 'egg':
+      return buildEggMesh(rx, ry, rz);
     case 'pyramid':
       return buildPyramidMesh(rx, ry, rz);
     case 'octahedron':
@@ -536,8 +581,9 @@ export function buildSolidVoxelMesh(kind, rx, ry, rz, round = 0) {
  */
 export function flatMeshForPreset(kind, rx, ry, rz, round = 0, roundedEdges = false) {
   if (!roundedEdges) {
-    if (kind === 'ellipsoid') return buildBoxMesh(rx, ry, rz);
-    if (kind === 'torus') return buildBoxMesh(rx, ry * 0.55, rz);
+    if (kind === 'ellipsoid') return buildEllipsoidMesh(rx, ry, rz);
+    if (kind === 'egg') return buildEggMesh(rx, ry, rz);
+    if (kind === 'torus') return buildTorusMesh(rx, ry, rz, 20, 12);
     if (kind === 'cone') return buildPyramidMesh(rx, ry, rz);
     if (kind === 'cylinder') return buildBoxMesh(rx, ry, rz);
     return meshForPreset(kind, rx, ry, rz, 0);
@@ -548,6 +594,8 @@ export function flatMeshForPreset(kind, rx, ry, rz, round = 0, roundedEdges = fa
   switch (kind) {
     case 'ellipsoid':
       return buildEllipsoidMesh(rx, ry, rz);
+    case 'egg':
+      return buildEggMesh(rx, ry, rz);
     case 'cone':
       return buildConeMesh(rx, ry, rz, 20);
     case 'cylinder':
