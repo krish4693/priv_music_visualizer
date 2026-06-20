@@ -773,8 +773,8 @@ function updateExportButtonLabel() {
   if (!exportBtn) return;
   const mode = getRendererMode();
   exportBtn.textContent = mode === 'cinematic'
-    ? 'Export MP4 (720p · Cinematic)'
-    : 'Export MP4 (720p · Pop Art)';
+    ? 'Export MP4 (1080p · Cinematic)'
+    : 'Export MP4 (1080p · Pop Art)';
 }
 
 function setupRendererMode() {
@@ -1431,6 +1431,7 @@ async function handleExport(preview = false) {
     exportBtn.disabled = false;
     previewExportBtn.disabled = !audioBuffer;
     playBtn.disabled = false;
+    refreshPreview();
     setTimeout(() => {
       showCreateProgress(false);
       setCreateProgress(0, '');

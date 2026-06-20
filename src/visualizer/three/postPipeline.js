@@ -32,7 +32,39 @@ const VignetteShader = {
   `,
 };
 
-/** @param {{ bloom: import('three/addons/postprocessing/UnrealBloomPass.js').UnrealBloomPass, vignette: import('three/addons/postprocessing/ShaderPass.js').ShaderPass }} pipeline @param {import('../cinematicSettingsStore.js').CinematicSettings} settings */
+const FilmGrainShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    amount: { value: 0.12 },
+    time: { value: 0 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float amount;
+    uniform float time;
+    varying vec2 vUv;
+
+    float hash(vec2 p) {
+      return fract(sin(dot(p, vec2(127.1, 311.7)) + time) * 43758.5453);
+    }
+
+    void main() {
+      vec4 color = texture2D(tDiffuse, vUv);
+      float n = hash(vUv * vec2(1920.0, 1080.0) + time * 17.0) - 0.5;
+      color.rgb += n * amount;
+      gl_FragColor = color;
+    }
+  `,
+};
+
+/** @param {{ bloom: UnrealBloomPass, vignette: ShaderPass, grain: ShaderPass, time: number }} pipeline @param {import('../cinematicSettingsStore.js').CinematicSettings} settings */
 export function applyPostSettings(pipeline, settings) {
   const bloomStrength = (settings.bloom / 100) * 1.15;
   const bloomRadius = 0.08 + (settings.bloomRadius / 100) * 0.72;
@@ -43,6 +75,14 @@ export function applyPostSettings(pipeline, settings) {
   const vig = settings.vignette / 100;
   pipeline.vignette.uniforms.offset.value = 0.85 + vig * 0.55;
   pipeline.vignette.uniforms.darkness.value = 0.65 + vig * 1.35;
+
+  const grainAmt = (settings.filmGrain / 100) * 0.22;
+  pipeline.grain.uniforms.amount.value = grainAmt;
+}
+
+/** @param {number} time */
+export function updatePostTime(pipeline, time) {
+  if (pipeline?.grain) pipeline.grain.uniforms.time.value = time;
 }
 
 /**
@@ -63,7 +103,10 @@ export function createPostPipeline(renderer, scene, camera, width, height, setti
   const vignette = new ShaderPass(VignetteShader);
   composer.addPass(vignette);
 
-  const pipeline = { composer, bloom, vignette };
+  const grain = new ShaderPass(FilmGrainShader);
+  composer.addPass(grain);
+
+  const pipeline = { composer, bloom, vignette, grain, time: 0 };
   applyPostSettings(pipeline, settings);
   return pipeline;
 }

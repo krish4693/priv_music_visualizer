@@ -61,6 +61,8 @@ export const LIVELY_CINEMATIC = normalizeCinematicSettings({
   letterbox: 32,
   cameraOrbit: 52,
   floorGloss: 28,
+  showFloor: true,
+  filmGrain: 32,
 });
 
 export const LIVELY_BG = '#101018';

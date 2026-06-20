@@ -2,7 +2,8 @@ import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import {
   drawFrameAt,
-  getCanvasSize,
+  getExportSize,
+  getPreviewSize,
   resetRenderer,
   setPlaybackAutomation,
   clearAutomationPaletteCache,
@@ -54,7 +55,8 @@ export async function exportToMp4({
   automationKeyframes = null,
 }) {
   const { frames, frameCount } = analysis;
-  const { width, height } = getCanvasSize();
+  const { width, height } = getExportSize();
+  const previewSize = getPreviewSize();
   const totalDuration = frameCount / FPS;
 
   const clipStart = Math.max(0, Math.min(startTime, totalDuration));
@@ -67,7 +69,7 @@ export async function exportToMp4({
   const endFrame = Math.min(frameCount, Math.ceil(clipEnd * FPS));
   const frameStep = preview ? 2 : 1;
   const exportFps = preview ? 15 : FPS;
-  const jpegQuality = preview ? 0.62 : 0.85;
+  const jpegQuality = preview ? 0.62 : 0.92;
   const outputFrameCount = Math.ceil((endFrame - startFrame) / frameStep);
 
   const offscreen = document.createElement('canvas');
@@ -75,6 +77,7 @@ export async function exportToMp4({
   offscreen.height = height;
   const offCtx = offscreen.getContext('2d');
 
+  try {
   resetRenderer(width, height);
   clearAutomationPaletteCache();
   setPlaybackAutomation(automationKeyframes ?? null);
@@ -104,7 +107,7 @@ export async function exportToMp4({
 
   onProgress?.(78, 'Encoding MP4…');
   const x264Preset = preview ? 'ultrafast' : 'fast';
-  const crf = preview ? '28' : '23';
+  const crf = preview ? '28' : '18';
 
   await ffmpeg.exec([
     '-framerate', String(exportFps),
@@ -136,6 +139,11 @@ export async function exportToMp4({
 
   onProgress?.(100, 'Done!');
   return mp4Blob;
+  } finally {
+    resetRenderer(previewSize.width, previewSize.height);
+    clearAutomationPaletteCache();
+    setPlaybackAutomation(null);
+  }
 }
 
 function canvasToJpeg(canvas, quality) {

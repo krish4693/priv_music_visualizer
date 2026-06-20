@@ -1,13 +1,16 @@
 # Music Visualizer
 
-Upload an MP3 or WAV, preview a live audio-reactive visualization in your browser, and export a 720p MP4 synced to the full track length.
+Upload an MP3 or WAV, preview a live audio-reactive visualization in your browser, and export a **1080p MP4** synced to the full track length.
 
 ## Features
 
-- Drag-and-drop MP3 / WAV upload
-- Live preview (frequency bars + waveform) while playing
-- Offline frame rendering driven by FFT analysis (RMS, bass/mid/high bands)
-- Local MP4 export via ffmpeg.wasm — no server, audio stays on your machine
+- Drag-and-drop MP3 / WAV upload (bundled dev sample loads automatically)
+- **Pop Art (Classic)** — Canvas 2D with flat faces and Kanten outlines
+- **Cinematic (WebGL)** — Three.js PBR, bloom, fog, film grain, shadows, optional ground floor, 3D song title
+- Parameter mapping panel — route bass, mids, beats, etc. to geometry, color, motion, morphing
+- Unified **Save config** / **Open config** (`.mviz.json`) — look, automation, renderer mode
+- Preview clip export (time range, fast) + full **1080p** export (CRF 18)
+- Live preview at 720p; export renders at 1920×1080
 
 ## Requirements
 
@@ -23,22 +26,28 @@ npm run dev
 
 Open the URL shown (usually http://localhost:5173).
 
-On first load (no saved files in browser storage), the app auto-loads bundled dev samples:
-- `public/samples/aboud-vs-flab.wav` — *02 AboudVsFlab*
-- `public/samples/flab-the-blue-monk.jpg` — FLAB cover art
+On first load, the app tries the bundled sample `public/samples/aboud-vs-flab.wav`, then falls back to audio saved in browser storage.
 
 ## Usage
 
-1. Drop or select an MP3 or WAV file
-2. Click **Play** to preview the visualization
-3. Click **Export MP4 (720p)** to render and download the video
+1. Drop or select an MP3 or WAV file (or use the bundled sample)
+2. Choose **Pop Art** or **Cinematic** above the preview
+3. Tweak mappings, colors, and cinematic settings
+4. Click **Play** to preview
+5. **Save config** to keep your look; **Open config** to restore
+6. **Export full MP4** for 1080p output, or **Preview clip** for a quick range test
 
-Export time depends on track length (roughly 1–3× realtime for a 3-minute song). Shorter tracks work best for the first try.
+Export time depends on track length (roughly 1–3× realtime for a 3-minute song at 1080p).
 
 ## Tech
 
 - Vite + vanilla JS
-- Web Audio API (decode + live analyser)
-- Custom FFT for per-frame analysis at 30 fps
-- Canvas 2D renderer (1280×720)
+- Web Audio API + custom FFT analysis at 30 fps
+- Pop Art: Canvas 2D (`popArtScene.js`)
+- Cinematic: Three.js WebGL + post-processing (`cinematicScene.js`)
 - @ffmpeg/ffmpeg for MP4 muxing
+
+## Git branches
+
+- `main` — Pop Art classic (tag `popart-v1`)
+- `feature/cinematic-threejs` — Cinematic WebGL + config system

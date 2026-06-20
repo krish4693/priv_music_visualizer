@@ -7,9 +7,11 @@ import { POP_ART_COLORS, resolvePalette } from './popArtPalette.js';
 import { SHAPE_PRESETS } from './shapePresets.js';
 import { geometryForShapeType, cinematicMaterial, updateCinematicMaterial, UNIT } from './three/shapeFactory.js';
 import { CameraRig } from './three/cameraRig.js';
-import { createPostPipeline, resizePostPipeline, disposePostPipeline, applyPostSettings } from './three/postPipeline.js';
+import { createPostPipeline, resizePostPipeline, disposePostPipeline, applyPostSettings, updatePostTime } from './three/postPipeline.js';
 import { loadCinematicSettings, normalizeCinematicSettings } from './cinematicSettingsStore.js';
 import { spreadSpinAxis, spreadDriftAxis } from './motionSpread.js';
+import { CinematicTitleGroup } from './three/cinematicTitle.js';
+import { titleTimingFromFrequency } from './titleStore.js';
 
 const MIN_SHAPES = 8;
 const MAX_SHAPES = 28;
@@ -94,6 +96,15 @@ export class CinematicScene {
     this.shapes = [];
     this.songTitle = '';
     this.titleFrequency = 65;
+    this.titleColorIdx = 0;
+    this.title = {
+      opacity: 0,
+      shapeIndex: 0,
+      wasVisible: false,
+      surpriseHold: 0,
+    };
+    this._titleClock = 0;
+    this._cinematicTitle = new CinematicTitleGroup();
     this.liveAnalysis = null;
     this._automationSample = null;
     this._surpriseRush = 1;
@@ -248,15 +259,105 @@ export class CinematicScene {
 
   setSongTitle(text) {
     this.songTitle = (text || '').trim().slice(0, 80);
+    this.title.wasVisible = false;
+    this._rebuildTitleMesh();
   }
 
   setTitleFrequency(freq) {
     this.titleFrequency = Math.min(100, Math.max(0, freq));
   }
 
+  _rebuildTitleMesh() {
+    if (!this.songTitle) {
+      this._cinematicTitle.clear();
+      return;
+    }
+    const color = paletteColorThree(this.palette, this.titleColorIdx + this.colorOffset);
+    this._cinematicTitle.rebuild(this.songTitle, color, this._materialOpts());
+  }
+
+  _pickTitleHostIndex() {
+    const preferred = new Set(['rectangle', 'cube', 'pillar']);
+    const candidates = [];
+    for (let i = 0; i < this.shapes.length; i++) {
+      const s = this.shapes[i];
+      const type = s.morphT < 0.5 ? s.type : s.morphTarget;
+      if (preferred.has(type)) candidates.push(i);
+    }
+    if (candidates.length) return candidates[Math.floor(this.rng() * candidates.length)];
+    return Math.floor(this.rng() * this.shapes.length);
+  }
+
+  _updateTitle(frame, dt = 1 / 30) {
+    if (!this.songTitle || !this.shapes.length) {
+      this.title.opacity = 0;
+      this.title.wasVisible = false;
+      this._cinematicTitle.setOpacity(0);
+      return;
+    }
+
+    if (this.title.surpriseHold > 0) {
+      this.title.surpriseHold = Math.max(0, this.title.surpriseHold - dt);
+      this.title.opacity = 1;
+      this.title.wasVisible = true;
+      if (frame.beat) {
+        this.titleColorIdx = (this.titleColorIdx + 1) % this.palette.length;
+        this._rebuildTitleMesh();
+      }
+      this._syncTitleMesh();
+      return;
+    }
+
+    let t = frame.time;
+    if (t == null || !Number.isFinite(t)) {
+      this._titleClock += dt;
+      t = this._titleClock;
+    }
+
+    const { cycleSec, showSec, fadeSec } = titleTimingFromFrequency(this.titleFrequency);
+    const phaseOffset = ((this.variation.seed % 100) / 100) * Math.max(0, cycleSec - showSec - 0.5);
+    const pos = (t + phaseOffset) % cycleSec;
+    const inWindow = pos < showSec;
+
+    let opacity = 0;
+    if (inWindow) {
+      if (pos < fadeSec) opacity = pos / fadeSec;
+      else if (pos > showSec - fadeSec) opacity = (showSec - pos) / fadeSec;
+      else opacity = 1;
+    }
+
+    if (inWindow && !this.title.wasVisible) {
+      this.title.shapeIndex = this._pickTitleHostIndex();
+      this.titleColorIdx = Math.floor(this.rng() * this.palette.length);
+      this._rebuildTitleMesh();
+    }
+
+    if (frame.beat && inWindow && opacity > 0.5) {
+      this.titleColorIdx = (this.titleColorIdx + 1) % this.palette.length;
+      this._rebuildTitleMesh();
+    }
+
+    this.title.wasVisible = inWindow;
+    this.title.opacity = opacity;
+    this._syncTitleMesh();
+  }
+
+  _syncTitleMesh() {
+    const host = this.shapes[this.title.shapeIndex];
+    const hostMesh = host ? this._meshByShape.get(host) : null;
+    if (!host || !hostMesh || this.title.opacity <= 0.02) {
+      this._cinematicTitle.syncToHost(null, null);
+      this._cinematicTitle.setOpacity(0);
+      return;
+    }
+    this._cinematicTitle.syncToHost(hostMesh, host);
+    this._cinematicTitle.setOpacity(this.title.opacity);
+  }
+
   setPalette(palette) {
     this.palette = palette?.length ? palette.map((c) => ({ ...c })) : [...POP_ART_COLORS];
     this._updateMeshColors();
+    this._rebuildTitleMesh();
   }
 
   setMappings(mappings) {
@@ -383,6 +484,7 @@ export class CinematicScene {
   }
 
   _clearMeshes() {
+    this._cinematicTitle.syncToHost(null, null);
     for (const child of [...this._shapeRoot.children]) {
       child.traverse((obj) => {
         if (obj instanceof THREE.Mesh) {
@@ -562,6 +664,7 @@ export class CinematicScene {
     }
 
     this._cameraRig.update(this._sceneTime, mot);
+    this._updateTitle(frame, dt);
     this._applyShapeTransforms();
     this._snapshotLiveAnalysis(sources, raw, frame, geo, mot, morph);
   }
@@ -579,6 +682,7 @@ export class CinematicScene {
   }
 
   draw(ctx) {
+    updatePostTime(this._post, this._sceneTime);
     this._post.composer.render();
     ctx.drawImage(this._renderer.domElement, 0, 0, this.width, this.height);
     this._drawLetterbox(ctx);
@@ -586,6 +690,7 @@ export class CinematicScene {
 
   dispose() {
     this._clearMeshes();
+    this._cinematicTitle.dispose();
     disposePostPipeline(this._post);
     this._floor.geometry.dispose();
     this._floor.material.dispose();

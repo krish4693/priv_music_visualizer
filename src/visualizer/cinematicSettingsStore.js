@@ -20,6 +20,7 @@ export const DEFAULT_CINEMATIC_SETTINGS = {
   cameraOrbit: 52,
   floorGloss: 28,
   showFloor: true,
+  filmGrain: 32,
 };
 
 function clamp(v, min, max) {
@@ -71,6 +72,7 @@ export function normalizeCinematicSettings(raw) {
     cameraOrbit: clamp(Number(raw.cameraOrbit) ?? d.cameraOrbit, 0, 100),
     floorGloss: clamp(Number(raw.floorGloss) ?? d.floorGloss, 0, 100),
     showFloor: raw.showFloor !== false,
+    filmGrain: clamp(Number(raw.filmGrain) ?? d.filmGrain, 0, 100),
   };
 }
 
@@ -94,6 +96,7 @@ export const CINEMATIC_SLIDERS = [
   { key: 'roughness', label: 'Surface roughness', min: 0, max: 100 },
   { key: 'emissive', label: 'Emissive glow', min: 0, max: 100 },
   { key: 'letterbox', label: 'Letterbox bars', min: 0, max: 100 },
+  { key: 'filmGrain', label: 'Film grain', min: 0, max: 100 },
   { key: 'cameraOrbit', label: 'Camera orbit', min: 0, max: 100 },
   { key: 'floorGloss', label: 'Floor reflectivity', min: 0, max: 100 },
 ];

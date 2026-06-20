@@ -13,8 +13,10 @@ import {
 import { AutomationRecorder } from './automationStore.js';
 import { applyPalettePreset, getActivePalette } from './paletteStore.js';
 
-const WIDTH = 1280;
-const HEIGHT = 720;
+const PREVIEW_WIDTH = 1280;
+const PREVIEW_HEIGHT = 720;
+const EXPORT_WIDTH = 1920;
+const EXPORT_HEIGHT = 1080;
 
 let scene = null;
 /** @type {'popart'|'cinematic'} */
@@ -82,7 +84,7 @@ export function syncAutomationAtTime(time) {
 export function drawFrameAt(ctx, frame, time) {
   syncAutomationAtTime(time);
   if (!scene) {
-    scene = createScene(ctx.canvas.width || WIDTH, ctx.canvas.height || HEIGHT);
+    scene = createScene(ctx.canvas.width || PREVIEW_WIDTH, ctx.canvas.height || PREVIEW_HEIGHT);
     applySceneSettings();
   }
   scene.update({ ...frame, time });
@@ -218,7 +220,7 @@ export function getViscosity() {
   return currentViscosity;
 }
 
-export function resetRenderer(width = WIDTH, height = HEIGHT) {
+export function resetRenderer(width = PREVIEW_WIDTH, height = PREVIEW_HEIGHT) {
   disposeScene();
   scene = createScene(width, height);
   applySceneSettings();
@@ -238,15 +240,23 @@ export function clearAutomationSample() {
 
 export function drawFrame(ctx, frame, _title = '') {
   if (!scene) {
-    scene = createScene(ctx.canvas.width || WIDTH, ctx.canvas.height || HEIGHT);
+    scene = createScene(ctx.canvas.width || PREVIEW_WIDTH, ctx.canvas.height || PREVIEW_HEIGHT);
     applySceneSettings();
   }
   scene.update(frame);
   scene.draw(ctx);
 }
 
+export function getPreviewSize() {
+  return { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT };
+}
+
+export function getExportSize() {
+  return { width: EXPORT_WIDTH, height: EXPORT_HEIGHT };
+}
+
 export function getCanvasSize() {
-  return { width: WIDTH, height: HEIGHT };
+  return getExportSize();
 }
 
 export function getRenderCanvas() {
