@@ -13,6 +13,7 @@ import {
   shadeFactor,
   flatMeshForPreset,
 } from './math3d.js';
+import { spreadSpinAxis, spreadDriftAxis } from './motionSpread.js';
 
 const WIDTH = 1280;
 const HEIGHT = 720;
@@ -308,6 +309,7 @@ export class PopArtScene {
     const spread = this.variation.layoutSpread / 100;
     const sizeSpread = this.variation.sizeSpread / 100;
     const spin = this.variation.spinIntensity / 100;
+    const speedSpread = (this.variation.speedSpread ?? DEFAULT_VARIATION.speedSpread) / 100;
     const depth = this.variation.depthRange / 100;
     const enabled = this._enabledShapeIds();
     const positions = curatedLayout(count, width, height, spread, rng);
@@ -330,15 +332,15 @@ export class PopArtScene {
         homeX: pos.x,
         homeY: pos.y,
         homeZ: z,
-        vx: (rng() - 0.5) * 0.3,
-        vy: (rng() - 0.5) * 0.3,
-        vz: (rng() - 0.5) * 0.16 * (0.5 + depth),
+        vx: spreadDriftAxis(rng, 0.3, speedSpread),
+        vy: spreadDriftAxis(rng, 0.3, speedSpread),
+        vz: spreadDriftAxis(rng, 0.16, speedSpread, 0.5 + depth),
         rotX: rng() * Math.PI * 2,
         rotY: rng() * Math.PI * 2,
         rotZ: rng() * Math.PI * 2,
-        rotSpeedX: (rng() - 0.5) * 0.76 * spinMul,
-        rotSpeedY: (rng() - 0.5) * 0.64 * spinMul,
-        rotSpeedZ: (rng() - 0.5) * 0.84 * spinMul,
+        rotSpeedX: spreadSpinAxis(rng, 0.76, spinMul, speedSpread),
+        rotSpeedY: spreadSpinAxis(rng, 0.64, spinMul, speedSpread),
+        rotSpeedZ: spreadSpinAxis(rng, 0.84, spinMul, speedSpread),
         type,
         morphTarget,
         morphT: rng() * 0.4,

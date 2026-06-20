@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Music Parameter Visualizer</title>
+    <link rel="preload" href="/samples/aboud-vs-flab.wav" as="fetch" crossorigin="anonymous" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -19,24 +20,13 @@
           <section class="shapes-bar panel-inner">
             <div class="shapes-bar-head">
               <span class="variation-group-label">Shape types</span>
-              <div class="seed-controls">
-                <label class="variation-seed">
-                  <span>Seed</span>
-                  <input type="number" id="variation-seed" min="1" max="99999" step="1" aria-label="Variation seed" />
-                </label>
-                <button type="button" class="variation-save-seed-btn" id="variation-save-seed-btn">Save seed</button>
-                <button type="button" class="variation-copy-seed-btn" id="variation-copy-seed-btn" title="Copy seed number only">Copy seed</button>
-                <button type="button" class="variation-copy-preset-btn" id="variation-copy-preset-btn" title="Copy all settings to clipboard">Save look</button>
-                <button type="button" class="variation-load-preset-btn" id="variation-load-preset-btn" title="Paste a saved look code">Load look</button>
-                <button type="button" class="variation-new-btn" id="variation-new-btn">New seed</button>
-                <span class="seed-saved-hint" id="seed-saved-hint" hidden>Saved</span>
+                <div class="config-toolbar">
+                <button type="button" class="config-save-btn" id="save-config-btn">Save config</button>
+                <button type="button" class="config-open-btn" id="open-config-btn">Open config</button>
+                <input type="file" id="open-config-input" accept=".mviz.json,.json,.vtake" hidden aria-hidden="true" />
+                <span class="config-status" id="config-status" hidden></span>
               </div>
             </div>
-            <ol class="seed-note seed-steps">
-              <li><strong>Save look:</strong> tune everything → click <strong>Save look</strong> → code is copied</li>
-              <li><strong>Load look:</strong> click <strong>Load look</strong> → paste that long code</li>
-              <li><strong>Seed only</strong> (number): same shape positions — use Seed field + Save seed</li>
-            </ol>
             <div class="shape-toggles shape-toggles-always" id="shape-toggles"></div>
           </section>
 
@@ -154,19 +144,36 @@
                 <input type="range" id="playhead-slider" min="0" max="0" step="0.01" value="0" disabled aria-label="Timeline playhead" />
               </label>
               <button id="record-btn" disabled title="Record parameter changes while playing">Record</button>
-              <button type="button" id="save-take-btn" disabled title="Save recording as a .vtake file">Save take</button>
-              <button type="button" id="load-take-btn" disabled title="Open a saved .vtake file">Load take</button>
-              <input type="file" id="load-take-input" accept=".vtake,.json,application/json" hidden aria-hidden="true" />
               <button type="button" id="clear-automation-btn" disabled title="Delete recording">Clear</button>
               <span class="automation-status" id="automation-status"></span>
               <span id="time-display">0:00 / 0:00</span>
             </div>
-            <p class="take-note">1. <strong>Record</strong> while playing · toggle <strong>Colors</strong> swatches too · 2. <strong>Save take</strong> · 3. <strong>Load take</strong> + Play</p>
+            <p class="take-note">Record while playing · save everything with <strong>Save config</strong></p>
           </section>
         </main>
 
         <!-- RIGHT: variation -->
         <aside class="panel panel-right">
+          <section class="cinematic-section panel-inner" id="cinematic-section" hidden>
+            <div class="variation-header">
+              <span class="variation-title">Cinematic look</span>
+              <span class="variation-hint">Fog, light, bloom &amp; shade</span>
+            </div>
+            <div class="cinematic-grid" id="cinematic-sliders"></div>
+            <div class="cinematic-toggles">
+              <label class="cinematic-toggle shape-toggle active" id="cinematic-floor-toggle">
+                <input type="checkbox" id="cinematic-floor-check" checked aria-label="Show ground floor" />
+                <span>Ground floor</span>
+              </label>
+              <label class="cinematic-toggle shape-toggle active" id="cinematic-shadows-toggle">
+                <input type="checkbox" id="cinematic-shadows-check" checked aria-label="Cast shadows" />
+                <span>Cast shadows</span>
+              </label>
+            </div>
+            <p class="variation-hint cinematic-floor-hint">Ground off = shapes float in space. Saved in config.</p>
+            <button type="button" class="variation-reset" id="cinematic-reset-btn">Reset cinematic</button>
+          </section>
+
           <section class="variation-section panel-inner" id="variation-section">
             <div class="variation-header">
               <span class="variation-title">Clip variation</span>
@@ -231,6 +238,14 @@
                 </div>
               </label>
               <label class="variation-field">
+                <span class="variation-field-label">Speed spread</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="speed-spread-slider" min="0" max="100" step="1" aria-label="Speed spread between shapes" />
+                  <span class="variation-val" id="speed-spread-val">45%</span>
+                </div>
+                <p class="variation-hint">Low = all items move at similar speed. High = more random variation.</p>
+              </label>
+              <label class="variation-field">
                 <span class="variation-field-label">Layout spread</span>
                 <div class="variation-slider-row">
                   <input type="range" id="layout-spread-slider" min="0" max="100" step="1" aria-label="Layout spread" />
@@ -281,7 +296,18 @@
         <!-- BOTTOM: export -->
         <footer class="panel panel-bottom">
           <section class="export-section panel-inner">
-            <button id="export-btn" disabled>Export MP4 (720p)</button>
+            <div class="clip-export-row">
+              <label class="clip-time-field">
+                <span>From</span>
+                <input type="number" id="clip-from" min="0" step="0.1" value="0" disabled aria-label="Clip start time in seconds" />
+              </label>
+              <label class="clip-time-field">
+                <span>To</span>
+                <input type="number" id="clip-to" min="0" step="0.1" value="0" disabled aria-label="Clip end time in seconds" />
+              </label>
+              <button type="button" id="preview-export-btn" disabled title="Fast MP4 preview of selected time range">Preview clip</button>
+            </div>
+            <button id="export-btn" disabled>Export full MP4</button>
             <div class="progress-wrap" id="create-progress-wrap" hidden>
               <p class="progress-heading">Video creation</p>
               <div class="progress-bar">

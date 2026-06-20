@@ -476,11 +476,119 @@ header {
   margin-bottom: 0.35rem;
 }
 
-.seed-controls {
+.seed-controls,
+.config-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 0.45rem 0.65rem;
+}
+
+.config-save-btn,
+.config-open-btn {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.82rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent, #7c5cff);
+  background: rgba(124, 92, 255, 0.18);
+  color: inherit;
+  cursor: pointer;
+}
+
+.config-save-btn:hover,
+.config-open-btn:hover {
+  background: rgba(124, 92, 255, 0.32);
+}
+
+.config-status {
+  font-size: 0.72rem;
+  color: var(--accent, #7c5cff);
+  align-self: center;
+}
+
+.clip-export-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+  width: 100%;
+}
+
+.clip-time-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.68rem;
+  color: var(--muted, #888);
+}
+
+.clip-time-field input {
+  width: 5.5rem;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  color: inherit;
+}
+
+#preview-export-btn {
+  font-size: 0.78rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 200, 120, 0.45);
+  background: rgba(0, 200, 120, 0.18);
+  color: inherit;
+  cursor: pointer;
+}
+
+#preview-export-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#preview-export-btn:hover:not(:disabled) {
+  background: rgba(0, 200, 120, 0.32);
+}
+
+.cinematic-section {
+  margin-bottom: 0.65rem;
+}
+
+.cinematic-section[hidden] {
+  display: none !important;
+}
+
+.cinematic-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.cinematic-field .variation-field-label {
+  font-size: 0.68rem;
+}
+
+.cinematic-toggle {
+  margin-bottom: 0;
+}
+
+.cinematic-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.35rem;
+}
+
+.cinematic-floor-hint {
+  margin: 0 0 0.45rem;
+}
+
+.cinematic-field.disabled {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .variation-save-seed-btn {

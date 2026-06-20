@@ -11,6 +11,7 @@ export const AUDIO_SOURCES = [
   { id: 'high', label: 'High Frequencies' },
   { id: 'amplitude', label: 'Overall Amplitude (RMS)' },
   { id: 'tempoPhase', label: 'Tempo / BPM Phase' },
+  { id: 'beatPulse', label: 'Beat Pulse' },
 ];
 
 export const VISUAL_TARGETS = [
@@ -22,13 +23,13 @@ export const VISUAL_TARGETS = [
 
 /** @type {MappingMatrix} */
 export const DEFAULT_MAPPINGS = {
-  geometry: { source: 'low', sensitivity: 0.85 },
-  color: { source: 'mid', sensitivity: 0.75 },
-  motion: { source: 'tempoPhase', sensitivity: 0.9 },
-  morphing: { source: 'high', sensitivity: 0.7 },
+  geometry: { source: 'low', sensitivity: 0.75 },
+  color: { source: 'mid', sensitivity: 0.55 },
+  motion: { source: 'beatPulse', sensitivity: 0.62 },
+  morphing: { source: 'tempoPhase', sensitivity: 0.45 },
 };
 
-export const DEFAULT_VISCOSITY = 0.38;
+export const DEFAULT_VISCOSITY = 0.5;
 
 function clamp01(v) {
   return Math.min(1, Math.max(0, v));

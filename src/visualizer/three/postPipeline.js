@@ -32,14 +32,28 @@ const VignetteShader = {
   `,
 };
 
+/** @param {{ bloom: import('three/addons/postprocessing/UnrealBloomPass.js').UnrealBloomPass, vignette: import('three/addons/postprocessing/ShaderPass.js').ShaderPass }} pipeline @param {import('../cinematicSettingsStore.js').CinematicSettings} settings */
+export function applyPostSettings(pipeline, settings) {
+  const bloomStrength = (settings.bloom / 100) * 1.15;
+  const bloomRadius = 0.08 + (settings.bloomRadius / 100) * 0.72;
+  pipeline.bloom.strength = bloomStrength;
+  pipeline.bloom.radius = bloomRadius;
+  pipeline.bloom.threshold = Math.max(0.55, 0.92 - bloomStrength * 0.35);
+
+  const vig = settings.vignette / 100;
+  pipeline.vignette.uniforms.offset.value = 0.85 + vig * 0.55;
+  pipeline.vignette.uniforms.darkness.value = 0.65 + vig * 1.35;
+}
+
 /**
  * @param {THREE.WebGLRenderer} renderer
  * @param {THREE.Scene} scene
  * @param {THREE.Camera} camera
  * @param {number} width
  * @param {number} height
+ * @param {import('../cinematicSettingsStore.js').CinematicSettings} settings
  */
-export function createPostPipeline(renderer, scene, camera, width, height) {
+export function createPostPipeline(renderer, scene, camera, width, height, settings) {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
 
@@ -49,7 +63,9 @@ export function createPostPipeline(renderer, scene, camera, width, height) {
   const vignette = new ShaderPass(VignetteShader);
   composer.addPass(vignette);
 
-  return { composer, bloom, vignette };
+  const pipeline = { composer, bloom, vignette };
+  applyPostSettings(pipeline, settings);
+  return pipeline;
 }
 
 /** @param {{ composer: EffectComposer }} pipeline */

@@ -20,6 +20,7 @@ export const COLOR_MODES = [
  * @property {number} shapeCount
  * @property {number} sizeSpread
  * @property {number} spinIntensity
+ * @property {number} speedSpread
  * @property {number} layoutSpread
  * @property {number} depthRange
  * @property {boolean} manualSpeed
@@ -35,21 +36,22 @@ export const COLOR_MODES = [
 /** @type {VariationSettings} */
 export const DEFAULT_VARIATION = {
   seed: 42817,
-  enabledShapes: ['rectangle', 'cube', 'oval', 'pillar'],
-  colorMode: 'tempo',
-  colorShift: 65,
-  shapeCount: 20,
-  sizeSpread: 35,
-  spinIntensity: 50,
-  layoutSpread: 50,
-  depthRange: 45,
+  enabledShapes: ['cube', 'oval', 'pillar'],
+  colorMode: 'energy',
+  colorShift: 55,
+  shapeCount: 14,
+  sizeSpread: 30,
+  spinIntensity: 62,
+  speedSpread: 45,
+  layoutSpread: 42,
+  depthRange: 52,
   manualSpeed: false,
   manualSpeedValue: 50,
-  surprises: true,
-  surpriseRate: 55,
-  roundedEdges: false,
-  kanten: true,
-  cornerRound: 45,
+  surprises: false,
+  surpriseRate: 20,
+  roundedEdges: true,
+  kanten: false,
+  cornerRound: 50,
   fixedLayout: true,
 };
 
@@ -71,6 +73,7 @@ export function cloneVariation(v) {
     shapeCount: v.shapeCount,
     sizeSpread: v.sizeSpread,
     spinIntensity: v.spinIntensity,
+    speedSpread: v.speedSpread,
     layoutSpread: v.layoutSpread,
     depthRange: v.depthRange,
     manualSpeed: !!v.manualSpeed,
@@ -109,6 +112,7 @@ export function loadVariation() {
       shapeCount: clamp(Number(parsed.shapeCount) || DEFAULT_VARIATION.shapeCount, 8, 28),
       sizeSpread: clamp(Number(parsed.sizeSpread) ?? DEFAULT_VARIATION.sizeSpread, 0, 100),
       spinIntensity: clamp(Number(parsed.spinIntensity) ?? DEFAULT_VARIATION.spinIntensity, 0, 100),
+      speedSpread: clamp(Number(parsed.speedSpread) ?? DEFAULT_VARIATION.speedSpread, 0, 100),
       layoutSpread: clamp(Number(parsed.layoutSpread) ?? DEFAULT_VARIATION.layoutSpread, 0, 100),
       depthRange: clamp(Number(parsed.depthRange) ?? DEFAULT_VARIATION.depthRange, 0, 100),
       manualSpeed: !!parsed.manualSpeed,

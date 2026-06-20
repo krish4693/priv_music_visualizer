@@ -15,7 +15,7 @@ export function loadRendererMode() {
   } catch {
     /* ignore */
   }
-  return 'popart';
+  return 'cinematic';
 }
 
 /** @param {RendererMode} mode */

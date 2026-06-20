@@ -9,9 +9,15 @@ export class CameraRig {
     this._baseRadius = 9.2;
   }
 
+  /** @param {number} [orbit] 0–100 */
+  setOrbitAmount(orbit = 45) {
+    this._orbitAmount = orbit / 100;
+  }
+
   /** @param {number} time @param {number} [motion] */
   update(time = 0, motion = 0) {
-    const orbit = 0.18 + motion * 0.12;
+    const orbitBase = 0.06 + (this._orbitAmount ?? 0.45) * 0.28;
+    const orbit = orbitBase + motion * 0.12;
     const radius = this._baseRadius - Math.sin(time * 0.07) * 0.45 - motion * 0.35;
     const angle = time * 0.038 * orbit;
     const x = Math.sin(angle) * radius * 0.42;

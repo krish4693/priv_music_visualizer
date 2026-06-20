@@ -28,6 +28,7 @@ export function createAudioSourceState() {
     beatPhase: 0,
     beatPeriod: 0.8,
     tempoPhaseSmooth: 0,
+    beatPulseSmooth: 0,
   };
 }
 
@@ -59,11 +60,16 @@ export function extractAudioSources(frame, state, dt = 1 / 30) {
   const rawPhase = (Math.sin(state.beatPhase * Math.PI * 2) + 1) / 2;
   state.tempoPhaseSmooth = lerp(state.tempoPhaseSmooth, rawPhase, SOURCE_SMOOTH * 0.8);
 
+  const rawBeatPulse = clamp01(frame.beatPulse ?? 0);
+  const beatSmooth = frame.beat ? 0.42 : 0.14;
+  state.beatPulseSmooth = lerp(state.beatPulseSmooth, rawBeatPulse, beatSmooth);
+
   return {
     low: clamp01(state.lowSmooth),
     mid: clamp01(state.midSmooth),
     high: clamp01(state.highSmooth),
     amplitude: clamp01(state.ampSmooth),
     tempoPhase: clamp01(state.tempoPhaseSmooth),
+    beatPulse: clamp01(state.beatPulseSmooth),
   };
 }

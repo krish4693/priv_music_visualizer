@@ -5,6 +5,13 @@ import { loadVariation, cloneVariation } from './variationStore.js';
 import { loadBackgroundColor, DEFAULT_BG } from './backgroundStore.js';
 import { loadSongTitle, loadTitleFrequency } from './titleStore.js';
 import { loadRendererMode, saveRendererMode, RENDERER_MODES } from './rendererModeStore.js';
+import {
+  loadCinematicSettings,
+  saveCinematicSettings,
+  normalizeCinematicSettings,
+} from './cinematicSettingsStore.js';
+import { AutomationRecorder } from './automationStore.js';
+import { applyPalettePreset, getActivePalette } from './paletteStore.js';
 
 const WIDTH = 1280;
 const HEIGHT = 720;
@@ -19,6 +26,68 @@ let currentPalette = null;
 let currentBackground = loadBackgroundColor();
 let currentSongTitle = loadSongTitle();
 let currentTitleFrequency = loadTitleFrequency();
+let currentCinematicSettings = loadCinematicSettings();
+const playbackAutomation = new AutomationRecorder();
+/** @type {string|null} */
+let lastAutomationPaletteSig = null;
+
+function applyPaletteFromAutomation(palette) {
+  if (!palette?.selectedKeys?.length) return null;
+  const sig = [...palette.selectedKeys].sort().join('|');
+  if (sig === lastAutomationPaletteSig) return null;
+  lastAutomationPaletteSig = sig;
+  const paletteState = applyPalettePreset(palette);
+  const active = getActivePalette(paletteState.fullPalette, paletteState.selectedPaletteIndices);
+  setVisualizerPalette(active);
+  return paletteState;
+}
+
+export function clearAutomationPaletteCache() {
+  lastAutomationPaletteSig = null;
+}
+
+/** @param {import('./automationStore.js').AutomationKeyframe[]} keyframes */
+export function setPlaybackAutomation(keyframes) {
+  clearAutomationPaletteCache();
+  if (!keyframes?.length) {
+    playbackAutomation.clear();
+    clearAutomationSample();
+    return;
+  }
+  playbackAutomation.loadKeyframes(keyframes);
+}
+
+export function getPlaybackAutomation() {
+  return playbackAutomation.exportData();
+}
+
+/** @returns {{ sample: import('./automationStore.js').AutomationKeyframe|null, paletteState: ReturnType<typeof applyPalettePreset>|null }} */
+export function syncAutomationAtTime(time) {
+  if (!playbackAutomation.isActive) {
+    clearAutomationSample();
+    return { sample: null, paletteState: null };
+  }
+  const sample = playbackAutomation.sampleAt(time);
+  if (!sample) {
+    clearAutomationSample();
+    return { sample: null, paletteState: null };
+  }
+  setAutomationSample(sample);
+  setViscosity(sample.viscosity);
+  setMappingMatrix(sample.mappings);
+  const paletteState = applyPaletteFromAutomation(sample.palette);
+  return { sample, paletteState };
+}
+
+export function drawFrameAt(ctx, frame, time) {
+  syncAutomationAtTime(time);
+  if (!scene) {
+    scene = createScene(ctx.canvas.width || WIDTH, ctx.canvas.height || HEIGHT);
+    applySceneSettings();
+  }
+  scene.update({ ...frame, time });
+  scene.draw(ctx);
+}
 
 function createScene(width, height) {
   return rendererMode === 'cinematic'
@@ -40,6 +109,7 @@ function applySceneSettings() {
   if (currentPalette) scene.setPalette(currentPalette);
   scene.setSongTitle(currentSongTitle);
   scene.setTitleFrequency(currentTitleFrequency);
+  scene.setCinematicSettings?.(currentCinematicSettings);
   if (!scene.shapes.length) scene.regenerate();
 }
 
@@ -100,6 +170,16 @@ export function setTitleFrequency(freq) {
 
 export function getTitleFrequency() {
   return currentTitleFrequency;
+}
+
+export function setCinematicSettings(settings) {
+  currentCinematicSettings = normalizeCinematicSettings(settings);
+  saveCinematicSettings(currentCinematicSettings);
+  scene?.setCinematicSettings?.(currentCinematicSettings);
+}
+
+export function getCinematicSettings() {
+  return { ...currentCinematicSettings };
 }
 
 export function setVariationSettings(settings) {

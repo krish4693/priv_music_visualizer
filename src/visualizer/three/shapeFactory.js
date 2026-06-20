@@ -37,15 +37,26 @@ export function geometryForShapeType(typeId, sizeMul = 1) {
   }
 }
 
-/** @param {THREE.Color} color */
-export function cinematicMaterial(color) {
+/** @param {THREE.Color} color @param {{ metalness?: number, roughness?: number, emissive?: number }} [opts] */
+export function cinematicMaterial(color, opts = {}) {
+  const metalness = (opts.metalness ?? 18) / 100;
+  const roughness = (opts.roughness ?? 16) / 100;
+  const emissiveAmt = (opts.emissive ?? 16) / 100;
   return new THREE.MeshStandardMaterial({
     color,
-    metalness: 0.58,
-    roughness: 0.28,
-    emissive: color.clone().multiplyScalar(0.12),
-    envMapIntensity: 0.85,
+    metalness: metalness * 0.65,
+    roughness,
+    emissive: color.clone().multiplyScalar(emissiveAmt * 0.28),
+    envMapIntensity: 0.35,
   });
+}
+
+/** @param {THREE.MeshStandardMaterial} mat @param {THREE.Color} color @param {{ metalness?: number, roughness?: number, emissive?: number }} opts */
+export function updateCinematicMaterial(mat, color, opts = {}) {
+  mat.color.copy(color);
+  mat.metalness = ((opts.metalness ?? 18) / 100) * 0.65;
+  mat.roughness = (opts.roughness ?? 16) / 100;
+  mat.emissive.copy(color).multiplyScalar(((opts.emissive ?? 16) / 100) * 0.28);
 }
 
 export { UNIT };

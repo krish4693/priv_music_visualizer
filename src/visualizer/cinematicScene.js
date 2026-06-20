@@ -5,13 +5,14 @@ import { DEFAULT_VARIATION } from './variationStore.js';
 import { DEFAULT_BG } from './backgroundStore.js';
 import { POP_ART_COLORS, resolvePalette } from './popArtPalette.js';
 import { SHAPE_PRESETS } from './shapePresets.js';
-import { geometryForShapeType, cinematicMaterial, UNIT } from './three/shapeFactory.js';
+import { geometryForShapeType, cinematicMaterial, updateCinematicMaterial, UNIT } from './three/shapeFactory.js';
 import { CameraRig } from './three/cameraRig.js';
-import { createPostPipeline, resizePostPipeline, disposePostPipeline } from './three/postPipeline.js';
+import { createPostPipeline, resizePostPipeline, disposePostPipeline, applyPostSettings } from './three/postPipeline.js';
+import { loadCinematicSettings, normalizeCinematicSettings } from './cinematicSettingsStore.js';
+import { spreadSpinAxis, spreadDriftAxis } from './motionSpread.js';
 
 const MIN_SHAPES = 8;
 const MAX_SHAPES = 28;
-const LETTERBOX = 0.075;
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
@@ -97,6 +98,7 @@ export class CinematicScene {
     this._automationSample = null;
     this._surpriseRush = 1;
     this._sceneTime = 0;
+    this.cinematicSettings = normalizeCinematicSettings(loadCinematicSettings());
 
     this._initThree();
     this.shapes = this._initShapes(width, height);
@@ -105,10 +107,11 @@ export class CinematicScene {
 
   _initThree() {
     this._threeScene = new THREE.Scene();
-    this._threeScene.fog = new THREE.FogExp2(hexToThree(this.bgColor), 0.048);
+    this._applyFog();
 
     this._camera = new THREE.PerspectiveCamera(42, this.width / this.height, 0.1, 120);
     this._cameraRig = new CameraRig(this._camera);
+    this._cameraRig.setOrbitAmount(this.cinematicSettings.cameraOrbit);
 
     this._renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -117,7 +120,7 @@ export class CinematicScene {
     });
     this._renderer.setSize(this.width, this.height, false);
     this._renderer.setPixelRatio(1);
-    this._renderer.shadowMap.enabled = true;
+    this._renderer.shadowMap.enabled = this.cinematicSettings.shadows;
     this._renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this._renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this._renderer.toneMappingExposure = 1.08;
@@ -126,9 +129,9 @@ export class CinematicScene {
     this._shapeRoot = new THREE.Group();
     this._threeScene.add(this._shapeRoot);
 
-    this._ambient = new THREE.AmbientLight(0x3a4466, 0.42);
-    this._keyLight = new THREE.DirectionalLight(0xfff0dd, 1.35);
-    this._keyLight.position.set(5.5, 9, 6);
+    this._ambient = new THREE.AmbientLight(0x8899bb, 0.42);
+    this._keyLight = new THREE.DirectionalLight(0xfff4e8, 1.35);
+    this._keyLight.position.set(2.5, 7, 10);
     this._keyLight.castShadow = true;
     this._keyLight.shadow.mapSize.set(1024, 1024);
     this._keyLight.shadow.camera.near = 1;
@@ -141,10 +144,13 @@ export class CinematicScene {
     this._rimLight = new THREE.DirectionalLight(0x88bbff, 0.85);
     this._rimLight.position.set(-6, 3, -8);
 
-    this._fillLight = new THREE.DirectionalLight(0xc8d4ff, 0.35);
-    this._fillLight.position.set(-4, -2, 5);
+    this._fillLight = new THREE.DirectionalLight(0xe8eeff, 0.35);
+    this._fillLight.position.set(-2, 1, 12);
 
-    this._threeScene.add(this._ambient, this._keyLight, this._rimLight, this._fillLight);
+    this._frontLight = new THREE.DirectionalLight(0xffffff, 1.1);
+    this._frontLight.position.set(0, 2.5, 14);
+
+    this._threeScene.add(this._ambient, this._keyLight, this._rimLight, this._fillLight, this._frontLight);
 
     const floorGeo = new THREE.PlaneGeometry(40, 40);
     const floorMat = new THREE.MeshStandardMaterial({
@@ -158,14 +164,74 @@ export class CinematicScene {
     this._floor.receiveShadow = true;
     this._threeScene.add(this._floor);
 
-    this._post = createPostPipeline(this._renderer, this._threeScene, this._camera, this.width, this.height);
+    this._post = createPostPipeline(this._renderer, this._threeScene, this._camera, this.width, this.height, this.cinematicSettings);
+    this._applyCinematicSettings();
     this._applyBackgroundColor(this.bgColor);
+  }
+
+  _materialOpts() {
+    const s = this.cinematicSettings;
+    return { metalness: s.metalness, roughness: s.roughness, emissive: s.emissive };
+  }
+
+  _applyFog() {
+    const density = (this.cinematicSettings.fog / 100) * 0.12;
+    if (density <= 0.001) {
+      this._threeScene.fog = null;
+      return;
+    }
+    if (!(this._threeScene.fog instanceof THREE.FogExp2)) {
+      this._threeScene.fog = new THREE.FogExp2(hexToThree(this.bgColor), density);
+    } else {
+      this._threeScene.fog.density = density;
+      this._threeScene.fog.color.copy(hexToThree(this.bgColor));
+    }
+  }
+
+  setCinematicSettings(settings) {
+    this.cinematicSettings = normalizeCinematicSettings(settings);
+    this._applyCinematicSettings();
+  }
+
+  getCinematicSettings() {
+    return { ...this.cinematicSettings };
+  }
+
+  _applyCinematicSettings() {
+    const s = this.cinematicSettings;
+    this._renderer.toneMappingExposure = s.exposure / 100;
+    this._renderer.shadowMap.enabled = s.shadows;
+    this._keyLight.castShadow = s.shadows;
+    this._keyLight.intensity = (s.keyLight / 100) * 2;
+    this._fillLight.intensity = (s.fillLight / 100) * 1;
+    this._frontLight.intensity = (s.frontLight / 100) * 1.8;
+    this._rimLight.intensity = (s.rimLight / 100) * 1.5;
+    this._ambient.intensity = (s.ambient / 100) * 1;
+    this._floor.material.metalness = s.floorGloss / 100;
+    this._floor.material.roughness = 1 - (s.floorGloss / 100) * 0.55;
+    this._floor.visible = s.showFloor;
+    this._cameraRig.setOrbitAmount(s.cameraOrbit);
+    this._applyFog();
+    if (this._post) applyPostSettings(this._post, s);
+    this._updateMeshMaterials();
+  }
+
+  _updateMeshMaterials() {
+    const opts = this._materialOpts();
+    for (const s of this.shapes) {
+      const mesh = this._meshByShape.get(s);
+      if (!mesh?.material) continue;
+      const color = paletteColorThree(this.palette, s.colorIdx + this.colorOffset);
+      updateCinematicMaterial(mesh.material, color, opts);
+    }
   }
 
   _applyBackgroundColor(color) {
     const c = hexToThree(color);
     this._renderer.setClearColor(c, 1);
-    if (this._threeScene.fog) this._threeScene.fog.color.copy(c);
+    if (this._threeScene.fog instanceof THREE.FogExp2) {
+      this._threeScene.fog.color.copy(c);
+    }
   }
 
   getRenderCanvas() {
@@ -274,6 +340,7 @@ export class CinematicScene {
     const spread = this.variation.layoutSpread / 100;
     const sizeSpread = this.variation.sizeSpread / 100;
     const spin = this.variation.spinIntensity / 100;
+    const speedSpread = (this.variation.speedSpread ?? DEFAULT_VARIATION.speedSpread) / 100;
     const depth = this.variation.depthRange / 100;
     const enabled = this._enabledShapeIds();
     const positions = curatedLayout(count, width, height, spread, rng);
@@ -293,15 +360,15 @@ export class CinematicScene {
         homeX: pos.x,
         homeY: pos.y,
         homeZ: z,
-        vx: (rng() - 0.5) * 0.3,
-        vy: (rng() - 0.5) * 0.3,
-        vz: (rng() - 0.5) * 0.16 * (0.5 + depth),
+        vx: spreadDriftAxis(rng, 0.3, speedSpread),
+        vy: spreadDriftAxis(rng, 0.3, speedSpread),
+        vz: spreadDriftAxis(rng, 0.16, speedSpread, 0.5 + depth),
         rotX: rng() * Math.PI * 2,
         rotY: rng() * Math.PI * 2,
         rotZ: rng() * Math.PI * 2,
-        rotSpeedX: (rng() - 0.5) * 0.76 * spinMul,
-        rotSpeedY: (rng() - 0.5) * 0.64 * spinMul,
-        rotSpeedZ: (rng() - 0.5) * 0.84 * spinMul,
+        rotSpeedX: spreadSpinAxis(rng, 0.76, spinMul, speedSpread),
+        rotSpeedY: spreadSpinAxis(rng, 0.64, spinMul, speedSpread),
+        rotSpeedZ: spreadSpinAxis(rng, 0.84, spinMul, speedSpread),
         type,
         morphTarget,
         morphT: rng() * 0.4,
@@ -334,7 +401,7 @@ export class CinematicScene {
       const s = this.shapes[i];
       const color = paletteColorThree(this.palette, s.colorIdx + this.colorOffset);
       const geo = geometryForShapeType(s.type, s.sizeMul);
-      const mat = cinematicMaterial(color);
+      const mat = cinematicMaterial(color, this._materialOpts());
       const mesh = new THREE.Mesh(geo, mat);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
@@ -345,13 +412,7 @@ export class CinematicScene {
   }
 
   _updateMeshColors() {
-    for (const s of this.shapes) {
-      const mesh = this._meshByShape.get(s);
-      if (!mesh?.material) continue;
-      const color = paletteColorThree(this.palette, s.colorIdx + this.colorOffset);
-      mesh.material.color.copy(color);
-      mesh.material.emissive.copy(color).multiplyScalar(0.12);
-    }
+    this._updateMeshMaterials();
   }
 
   _applyShapeTransforms() {
@@ -505,8 +566,12 @@ export class CinematicScene {
     this._snapshotLiveAnalysis(sources, raw, frame, geo, mot, morph);
   }
 
+  _letterboxAmount() {
+    return (this.cinematicSettings.letterbox / 100) * 0.12;
+  }
+
   _drawLetterbox(ctx) {
-    const bar = Math.round(this.height * LETTERBOX);
+    const bar = Math.round(this.height * this._letterboxAmount());
     if (bar < 2) return;
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, this.width, bar);

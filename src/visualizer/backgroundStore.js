@@ -1,5 +1,5 @@
 export const BG_STORAGE_KEY = 'visualizer-bg-color';
-export const DEFAULT_BG = '#1c1c1e';
+export const DEFAULT_BG = '#101018';
 
 function normalizeHex(value) {
   if (typeof value !== 'string') return DEFAULT_BG;

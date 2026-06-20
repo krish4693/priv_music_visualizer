@@ -1,17 +1,14 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
-import { drawFrame, getCanvasSize, resetRenderer, drawBackdrop } from '../visualizer/renderer.js';
+import {
+  drawFrameAt,
+  getCanvasSize,
+  resetRenderer,
+  setPlaybackAutomation,
+  clearAutomationPaletteCache,
+  drawBackdrop,
+} from '../visualizer/renderer.js';
 import { FPS } from '../audio/analyzer.js';
-
-// #region agent log
-const debugLog = (location, message, data, hypothesisId) => {
-  fetch('http://127.0.0.1:7257/ingest/e20d7077-f29a-4df5-b261-725d376d98f6', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '788c72' },
-    body: JSON.stringify({ sessionId: '788c72', location, message, data, timestamp: Date.now(), hypothesisId }),
-  }).catch(() => {});
-};
-// #endregion
 
 let ffmpegInstance = null;
 
@@ -37,129 +34,95 @@ function audioInputName(file) {
   return file.name.match(/\.wav$/i) ? 'input.wav' : 'input.mp3';
 }
 
-export async function exportToMp4({ analysis, audioFile, title, onProgress }) {
+/**
+ * @param {object} opts
+ * @param {{ frames: object[], frameCount: number }} opts.analysis
+ * @param {File} opts.audioFile
+ * @param {(pct: number, label: string) => void} [opts.onProgress]
+ * @param {number} [opts.startTime] seconds
+ * @param {number|null} [opts.endTime] seconds (exclusive cap)
+ * @param {boolean} [opts.preview] faster lower-quality export
+ * @param {import('../visualizer/automationStore.js').AutomationKeyframe[]} [opts.automationKeyframes]
+ */
+export async function exportToMp4({
+  analysis,
+  audioFile,
+  onProgress,
+  startTime = 0,
+  endTime = null,
+  preview = false,
+  automationKeyframes = null,
+}) {
   const { frames, frameCount } = analysis;
   const { width, height } = getCanvasSize();
-  const exportStart = performance.now();
+  const totalDuration = frameCount / FPS;
 
-  // #region agent log
-  debugLog('ffmpegExport.js:export-start', 'export started', {
-    frameCount,
-    durationSec: frameCount / FPS,
-    width,
-    height,
-    audioSize: audioFile?.size,
-  }, 'D');
-  // #endregion
+  const clipStart = Math.max(0, Math.min(startTime, totalDuration));
+  const clipEnd = endTime != null
+    ? Math.max(clipStart + 0.1, Math.min(endTime, totalDuration))
+    : totalDuration;
+  const clipDuration = clipEnd - clipStart;
+
+  const startFrame = Math.floor(clipStart * FPS);
+  const endFrame = Math.min(frameCount, Math.ceil(clipEnd * FPS));
+  const frameStep = preview ? 2 : 1;
+  const exportFps = preview ? 15 : FPS;
+  const jpegQuality = preview ? 0.62 : 0.85;
+  const outputFrameCount = Math.ceil((endFrame - startFrame) / frameStep);
 
   const offscreen = document.createElement('canvas');
   offscreen.width = width;
   offscreen.height = height;
   const offCtx = offscreen.getContext('2d');
+
   resetRenderer(width, height);
+  clearAutomationPaletteCache();
+  setPlaybackAutomation(automationKeyframes ?? null);
   drawBackdrop(offCtx);
 
-  onProgress?.(0, 'Loading video encoder (first time may take a moment)…');
+  onProgress?.(0, preview ? 'Starting preview export…' : 'Loading video encoder…');
   const ffmpeg = await getFFmpeg();
 
   const inputAudio = audioInputName(audioFile);
-  onProgress?.(3, 'Writing audio track…');
+  onProgress?.(3, 'Writing audio…');
   await ffmpeg.writeFile(inputAudio, await fetchFile(audioFile));
 
   const renderWeight = 72;
-  for (let i = 0; i < frameCount; i++) {
-    drawFrame(offCtx, frames[i], title);
-    const blob = await canvasToJpeg(offscreen, 0.85);
-    await ffmpeg.writeFile(`frame${padFrame(i)}.jpg`, new Uint8Array(await blob.arrayBuffer()));
+  let outIdx = 0;
+  for (let i = startFrame; i < endFrame; i += frameStep) {
+    const timeSec = i / FPS;
+    drawFrameAt(offCtx, { ...frames[i], time: timeSec }, timeSec);
+    const blob = await canvasToJpeg(offscreen, jpegQuality);
+    await ffmpeg.writeFile(`frame${padFrame(outIdx)}.jpg`, new Uint8Array(await blob.arrayBuffer()));
+    outIdx += 1;
 
-    const pct = 3 + ((i + 1) / frameCount) * renderWeight;
-    if (i % 10 === 0 || i === frameCount - 1) {
-      onProgress?.(pct, `Rendering frame ${i + 1} / ${frameCount}…`);
+    const pct = 3 + (outIdx / outputFrameCount) * renderWeight;
+    if (outIdx % 5 === 0 || outIdx === outputFrameCount) {
+      onProgress?.(pct, `Rendering ${outIdx} / ${outputFrameCount}…`);
     }
   }
 
-  const renderMs = Math.round(performance.now() - exportStart);
-  // #region agent log
-  debugLog('ffmpegExport.js:render-done', 'frame render complete', { frameCount, renderMs }, 'D');
-  // #endregion
+  onProgress?.(78, 'Encoding MP4…');
+  const x264Preset = preview ? 'ultrafast' : 'fast';
+  const crf = preview ? '28' : '23';
 
-  onProgress?.(78, 'Encoding MP4… 0%');
-  const execStart = performance.now();
-  let lastFfmpegProgress = 0;
-  let progressEventCount = 0;
-  const encodeStartPct = 78;
-  const encodeEndPct = 95;
-
-  const onFfmpegProgress = ({ progress, time }) => {
-    progressEventCount += 1;
-    lastFfmpegProgress = progress;
-    const encodePct = encodeStartPct + Math.min(1, Math.max(0, progress)) * (encodeEndPct - encodeStartPct);
-    onProgress?.(encodePct, `Encoding MP4… ${Math.round(progress * 100)}%`);
-    if (progressEventCount <= 3 || progressEventCount % 20 === 0) {
-      // #region agent log
-      debugLog('ffmpegExport.js:ffmpeg-progress', 'ffmpeg encoding progress', {
-        progress,
-        time,
-        progressEventCount,
-        elapsedMs: Math.round(performance.now() - execStart),
-      }, 'A');
-      // #endregion
-    }
-  };
-
-  const onFfmpegLog = ({ type, message }) => {
-    if (type === 'fferr' || /error|fail|memory|abort/i.test(message)) {
-      // #region agent log
-      debugLog('ffmpegExport.js:ffmpeg-log', 'ffmpeg log', { type, message: message.slice(0, 200) }, 'B');
-      // #endregion
-    }
-  };
-
-  ffmpeg.on('progress', onFfmpegProgress);
-  ffmpeg.on('log', onFfmpegLog);
-
-  // #region agent log
-  debugLog('ffmpegExport.js:exec-start', 'ffmpeg.exec starting', { frameCount, execStartMs: execStart }, 'B');
-  // #endregion
-
-  try {
-    await ffmpeg.exec([
-      '-framerate', String(FPS),
-      '-i', 'frame%06d.jpg',
-      '-i', inputAudio,
-      '-c:v', 'libx264',
-      '-pix_fmt', 'yuv420p',
-      '-preset', 'fast',
-      '-crf', '23',
-      '-c:a', 'aac',
-      '-b:a', '192k',
-      '-shortest',
-      'output.mp4',
-    ]);
-  } catch (execErr) {
-    // #region agent log
-    debugLog('ffmpegExport.js:exec-error', 'ffmpeg.exec threw', {
-      message: execErr?.message,
-      renderMs,
-      execMs: Math.round(performance.now() - execStart),
-      progressEventCount,
-      lastFfmpegProgress,
-    }, 'C');
-    // #endregion
-    throw execErr;
-  } finally {
-    ffmpeg.off('progress', onFfmpegProgress);
-    ffmpeg.off('log', onFfmpegLog);
-  }
-
-  // #region agent log
-  debugLog('ffmpegExport.js:exec-done', 'ffmpeg.exec finished', {
-    execMs: Math.round(performance.now() - execStart),
-    progressEventCount,
-    lastFfmpegProgress,
-    totalMs: Math.round(performance.now() - exportStart),
-  }, 'A');
-  // #endregion
+  await ffmpeg.exec([
+    '-framerate', String(exportFps),
+    '-i', 'frame%06d.jpg',
+    '-ss', String(clipStart),
+    '-i', inputAudio,
+    '-t', String(clipDuration),
+    '-map', '0:v:0',
+    '-map', '1:a:0',
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',
+    '-preset', x264Preset,
+    '-crf', crf,
+    '-c:a', 'aac',
+    '-b:a', preview ? '128k' : '192k',
+    '-shortest',
+    'output.mp4',
+  ]);
 
   onProgress?.(95, 'Finalizing…');
   const data = await ffmpeg.readFile('output.mp4');
@@ -167,7 +130,7 @@ export async function exportToMp4({ analysis, audioFile, title, onProgress }) {
 
   await ffmpeg.deleteFile(inputAudio);
   await ffmpeg.deleteFile('output.mp4');
-  for (let i = 0; i < frameCount; i++) {
+  for (let i = 0; i < outIdx; i++) {
     await ffmpeg.deleteFile(`frame${padFrame(i)}.jpg`).catch(() => {});
   }
 
