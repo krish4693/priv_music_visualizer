@@ -13,6 +13,16 @@ import { spreadSpinAxis, spreadDriftAxis } from './motionSpread.js';
 import { initSoftShapeMotion, updateSoftShapeMotion, syncSoftShapeMotionKind } from './roundShapeMotion.js';
 import { CinematicTitleGroup } from './three/cinematicTitle.js';
 import { titleTimingFromFrequency } from './titleStore.js';
+import {
+  getActiveConceptId,
+  initConceptEntities,
+  updateConceptExtras,
+  syncConceptScene,
+  applyConceptSceneTransforms,
+  updateConceptSceneColors,
+  clearConceptObjects,
+  isGeometricConcept,
+} from './concepts/index.js';
 
 const MIN_SHAPES = 8;
 const MAX_SHAPES = 28;
@@ -118,7 +128,7 @@ export class CinematicScene {
     this.cinematicSettings = normalizeCinematicSettings(loadCinematicSettings());
 
     this._initThree();
-    this.shapes = this._initShapes(width, height);
+    this._rebuildEntities(width, height);
     this._syncMeshes();
   }
 
@@ -274,6 +284,9 @@ export class CinematicScene {
     this.songTitle = (text || '').trim().slice(0, 80);
     this.title.wasVisible = false;
     this._rebuildTitleMesh();
+    if (getActiveConceptId(this.variation) === 'typography') {
+      this.regenerate();
+    }
   }
 
   setTitleFrequency(freq) {
@@ -290,6 +303,9 @@ export class CinematicScene {
   }
 
   _pickTitleHostIndex() {
+    if (!isGeometricConcept(getActiveConceptId(this.variation))) {
+      return Math.floor(this.rng() * Math.max(1, this.shapes.length));
+    }
     const preferred = new Set(['rectangle', 'cube', 'pillar']);
     const candidates = [];
     for (let i = 0; i < this.shapes.length; i++) {
@@ -302,6 +318,12 @@ export class CinematicScene {
   }
 
   _updateTitle(frame, dt = 1 / 30) {
+    if (getActiveConceptId(this.variation) === 'typography') {
+      this.title.opacity = 0;
+      this.title.wasVisible = false;
+      this._cinematicTitle.setOpacity(0);
+      return;
+    }
     if (!this.songTitle || !this.shapes.length) {
       this.title.opacity = 0;
       this.title.wasVisible = false;
@@ -388,6 +410,8 @@ export class CinematicScene {
 
   setVariation(settings) {
     const prevEnabled = [...(this.variation.enabledShapes ?? [])].sort().join(',');
+    const prevConcept = getActiveConceptId(this.variation);
+    const prevCount = this.variation.shapeCount;
     this.variation = {
       ...settings,
       enabledShapes: settings.enabledShapes?.length ? [...settings.enabledShapes] : ['cube'],
@@ -395,9 +419,17 @@ export class CinematicScene {
     };
     this.rng = createRng(this.variation.seed);
     const nextEnabled = [...this.variation.enabledShapes].sort().join(',');
-    if (prevEnabled !== nextEnabled) {
+    const nextConcept = getActiveConceptId(this.variation);
+    if (prevEnabled !== nextEnabled || prevConcept !== nextConcept || prevCount !== this.variation.shapeCount) {
       this.regenerate();
+    } else if (isGeometricConcept(nextConcept)) {
+      for (const s of this.shapes) this._enforceEnabledTypes(s);
     }
+  }
+
+  _rebuildEntities(width = this.width, height = this.height) {
+    const conceptEntities = initConceptEntities(this, width, height);
+    this.shapes = conceptEntities ?? this._initShapes(width, height);
   }
 
   resetPlayhead() {
@@ -410,7 +442,7 @@ export class CinematicScene {
   regenerate() {
     this._clearMeshes();
     this.rng = createRng(this.variation.seed);
-    this.shapes = this._initShapes(this.width, this.height);
+    this._rebuildEntities(this.width, this.height);
     this.colorOffset = 0;
     this._surpriseRush = 1;
     this._syncMeshes();
@@ -427,7 +459,7 @@ export class CinematicScene {
     this.rng = createRng(this.variation.seed);
     this._resizeThree(width, height);
     this._clearMeshes();
-    this.shapes = this._initShapes(width, height);
+    this._rebuildEntities(width, height);
     this._syncMeshes();
   }
 
@@ -535,6 +567,7 @@ export class CinematicScene {
 
   _clearMeshes() {
     this._cinematicTitle.syncToHost(null, null);
+    clearConceptObjects(this);
     for (const child of [...this._shapeRoot.children]) {
       child.traverse((obj) => {
         if (obj instanceof THREE.Mesh) {
@@ -548,6 +581,10 @@ export class CinematicScene {
   }
 
   _syncMeshes() {
+    if (!isGeometricConcept(getActiveConceptId(this.variation))) {
+      syncConceptScene(this);
+      return;
+    }
     this._meshByShape = new Map();
     for (let i = 0; i < this.shapes.length; i++) {
       const s = this.shapes[i];
@@ -564,10 +601,15 @@ export class CinematicScene {
   }
 
   _updateMeshColors() {
+    if (updateConceptSceneColors(this)) return;
     this._updateMeshMaterials();
   }
 
   _applyShapeTransforms() {
+    if (!isGeometricConcept(getActiveConceptId(this.variation))) {
+      applyConceptSceneTransforms(this);
+      return;
+    }
     for (const s of this.shapes) {
       const mesh = this._meshByShape.get(s);
       if (!mesh) continue;
@@ -673,6 +715,7 @@ export class CinematicScene {
     let mot = this.damped.motion;
     let morph = this.damped.morphing;
     const depth = this.variation.depthRange / 100;
+    const useConcept = !isGeometricConcept(getActiveConceptId(this.variation));
 
     if (this.variation.manualSpeed) {
       mot = this.variation.manualSpeedValue / 100;
@@ -723,15 +766,22 @@ export class CinematicScene {
       s.rotX += s.rotSpeedX * rotRate * motionDt * (s.surpriseSpinBoost ?? 1);
       s.rotY += s.rotSpeedY * rotRate * motionDt * (s.surpriseSpinBoost ?? 1);
       s.rotZ += s.rotSpeedZ * rotRate * motionDt * (s.surpriseSpinBoost ?? 1);
-      s.morphT = Math.min(1, s.morphT + (0.015 + morph * 0.07) * motionDt);
-      const prevActive = this._activeShapeType(s);
-      this._advanceMorph(s);
-      const nextActive = this._activeShapeType(s);
-      if (prevActive !== nextActive) {
-        this._updateMeshGeometryForShape(s);
+
+      if (!useConcept) {
+        s.morphT = Math.min(1, s.morphT + (0.015 + morph * 0.07) * motionDt);
+        const prevActive = this._activeShapeType(s);
+        this._advanceMorph(s);
+        const nextActive = this._activeShapeType(s);
+        if (prevActive !== nextActive) {
+          this._updateMeshGeometryForShape(s);
+        }
+        syncSoftShapeMotionKind(s, SHAPE_PRESETS[this._activeShapeType(s)]?.kind ?? 'box');
+        updateSoftShapeMotion(s, mot, motionDt);
       }
-      syncSoftShapeMotionKind(s, SHAPE_PRESETS[this._activeShapeType(s)]?.kind ?? 'box');
-      updateSoftShapeMotion(s, mot, motionDt);
+    }
+
+    if (useConcept) {
+      updateConceptExtras(this, { mot, geo, morph, motionDt, beat: frame.beat });
     }
 
     this._cameraRig.update(this._motionTime, mot);

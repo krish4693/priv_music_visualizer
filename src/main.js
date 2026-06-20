@@ -57,6 +57,7 @@ import {
   saveVariation,
   cloneVariation,
 } from './visualizer/variationStore.js';
+import { VISUAL_CONCEPTS, isGeometricConcept } from './visualizer/visualConceptStore.js';
 import { AutomationRecorder } from './visualizer/automationStore.js';
 import { buildAppConfig, downloadAppConfig, parseAppConfig, suggestConfigFilename } from './visualizer/configStore.js';
 import { loadBackgroundColor, saveBackgroundColor } from './visualizer/backgroundStore.js';
@@ -110,6 +111,8 @@ const colorPicker = document.getElementById('color-picker');
 const addColorBtn = document.getElementById('add-color-btn');
 const bgColorPicker = document.getElementById('bg-color-picker');
 const shapeToggles = document.getElementById('shape-toggles');
+const visualConceptSelect = document.getElementById('visual-concept-select');
+const shapeTypesLabel = document.getElementById('shape-types-label');
 const colorModeSelect = document.getElementById('color-mode-select');
 const colorShiftSlider = document.getElementById('color-shift-slider');
 const colorShiftVal = document.getElementById('color-shift-val');
@@ -1067,7 +1070,26 @@ function setupVariationPanel() {
     }
   }
 
+  function renderVisualConceptSelect() {
+    if (!visualConceptSelect) return;
+    visualConceptSelect.innerHTML = VISUAL_CONCEPTS.map(({ id, label }) =>
+      `<option value="${id}"${variation.visualConcept === id ? ' selected' : ''}>${label}</option>`,
+    ).join('');
+  }
+
+  renderVisualConceptSelect();
+  visualConceptSelect?.addEventListener('change', () => {
+    variation.visualConcept = visualConceptSelect.value;
+    renderShapeToggles();
+    applyVariation(true);
+  });
+
   function renderShapeToggles() {
+    const showShapes = isGeometricConcept(variation.visualConcept ?? 'geometric');
+    shapeTypesLabel?.toggleAttribute('hidden', !showShapes);
+    shapeToggles?.toggleAttribute('hidden', !showShapes);
+    if (!showShapes) return;
+
     shapeToggles.innerHTML = SHAPE_OPTIONS.map(({ id, label }) => {
       const on = variation.enabledShapes.includes(id);
       return `<label class="shape-toggle${on ? ' active' : ''}">
@@ -1173,6 +1195,7 @@ function setupVariationPanel() {
     cornerRoundSlider.value = String(variation.cornerRound);
     colorModeSelect.value = variation.colorMode;
     renderColorModeSelect();
+    renderVisualConceptSelect();
     renderShapeToggles();
     renderSpeedControls();
     syncSliderLabels();

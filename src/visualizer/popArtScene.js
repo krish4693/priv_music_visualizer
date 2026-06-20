@@ -15,6 +15,13 @@ import {
 } from './math3d.js';
 import { spreadSpinAxis, spreadDriftAxis } from './motionSpread.js';
 import { initSoftShapeMotion, updateSoftShapeMotion, syncSoftShapeMotionKind } from './roundShapeMotion.js';
+import {
+  getActiveConceptId,
+  initConceptEntities,
+  updateConceptExtras,
+  drawConceptScene,
+  isGeometricConcept,
+} from './concepts/index.js';
 
 const WIDTH = 1280;
 const HEIGHT = 720;
@@ -171,6 +178,9 @@ export class PopArtScene {
     this.songTitle = (text || '').trim().slice(0, 80);
     this.title.wasVisible = false;
     this._rebuildTitleLetters();
+    if (getActiveConceptId(this.variation) === 'typography') {
+      this.regenerate();
+    }
   }
 
   setTitleFrequency(freq) {
@@ -213,6 +223,8 @@ export class PopArtScene {
 
   setVariation(settings) {
     const prevEnabled = [...(this.variation.enabledShapes ?? [])].sort().join(',');
+    const prevConcept = getActiveConceptId(this.variation);
+    const prevCount = this.variation.shapeCount;
     this.variation = {
       ...settings,
       enabledShapes: settings.enabledShapes?.length ? [...settings.enabledShapes] : ['cube'],
@@ -220,11 +232,17 @@ export class PopArtScene {
     };
     this.rng = createRng(this.variation.seed);
     const nextEnabled = [...this.variation.enabledShapes].sort().join(',');
-    if (prevEnabled !== nextEnabled) {
+    const nextConcept = getActiveConceptId(this.variation);
+    if (prevEnabled !== nextEnabled || prevConcept !== nextConcept || prevCount !== this.variation.shapeCount) {
       this.regenerate();
-    } else {
+    } else if (isGeometricConcept(nextConcept)) {
       for (const s of this.shapes) this._enforceEnabledTypes(s);
     }
+  }
+
+  _rebuildEntities(width = this.width, height = this.height) {
+    const conceptEntities = initConceptEntities(this, width, height);
+    this.shapes = conceptEntities ?? this._initShapes(width, height);
   }
 
   /** Rebuild scene with current variation (e.g. after seed or shape change). */
@@ -247,7 +265,7 @@ export class PopArtScene {
     this.title.wasVisible = false;
     this.title.surpriseHold = 0;
     this.rng = createRng(this.variation.seed);
-    this.shapes = this._initShapes(this.width, this.height);
+    this._rebuildEntities(this.width, this.height);
   }
 
   reset(width = this.width, height = this.height) {
@@ -267,7 +285,7 @@ export class PopArtScene {
     this.title.wasVisible = false;
     this.title.surpriseHold = 0;
     this.rng = createRng(this.variation.seed);
-    this.shapes = this._initShapes(width, height);
+    this._rebuildEntities(width, height);
   }
 
   _enabledShapeIds() {
@@ -437,6 +455,9 @@ export class PopArtScene {
   }
 
   _pickTitleHostIndex() {
+    if (!isGeometricConcept(getActiveConceptId(this.variation))) {
+      return Math.floor(this.rng() * Math.max(1, this.shapes.length));
+    }
     const preferred = new Set(['rectangle', 'cube', 'pillar']);
     const candidates = [];
 
@@ -524,6 +545,7 @@ export class PopArtScene {
   }
 
   _updateSurprises(sources, frame, dt) {
+    if (!isGeometricConcept(getActiveConceptId(this.variation))) return;
     if (this._surpriseRush > 1) {
       this._surpriseRush = Math.max(1, this._surpriseRush - dt * 2.4);
     }
@@ -564,6 +586,11 @@ export class PopArtScene {
   }
 
   _updateTitle(frame, dt = 1 / 30) {
+    if (getActiveConceptId(this.variation) === 'typography') {
+      this.title.opacity = 0;
+      this.title.wasVisible = false;
+      return;
+    }
     if (!this.songTitle || !this.shapes.length) {
       this.title.opacity = 0;
       this.title.wasVisible = false;
@@ -678,6 +705,7 @@ export class PopArtScene {
     let mot = this.damped.motion;
     let morph = this.damped.morphing;
     const depth = this.variation.depthRange / 100;
+    const useConcept = !isGeometricConcept(getActiveConceptId(this.variation));
 
     if (this.variation.manualSpeed) {
       const manual = this.variation.manualSpeedValue / 100;
@@ -733,10 +761,16 @@ export class PopArtScene {
       s.rotY += s.rotSpeedY * rotRate * motionDt * s.surpriseSpinBoost;
       s.rotZ += s.rotSpeedZ * rotRate * motionDt * s.surpriseSpinBoost;
 
-      s.morphT = Math.min(1, s.morphT + morphRate * motionDt);
-      this._advanceMorph(s);
-      syncSoftShapeMotionKind(s, getShapeKind(s.morphT < 0.5 ? s.type : s.morphTarget));
-      updateSoftShapeMotion(s, mot, motionDt);
+      if (!useConcept) {
+        s.morphT = Math.min(1, s.morphT + morphRate * motionDt);
+        this._advanceMorph(s);
+        syncSoftShapeMotionKind(s, getShapeKind(s.morphT < 0.5 ? s.type : s.morphTarget));
+        updateSoftShapeMotion(s, mot, motionDt);
+      }
+    }
+
+    if (useConcept) {
+      updateConceptExtras(this, { mot, geo, morph, motionDt, beat: frame.beat });
     }
 
     this._updateTitle(frame, motionDt);
@@ -894,18 +928,22 @@ export class PopArtScene {
     ctx.globalCompositeOperation = 'source-over';
     ctx.drawImage(this._bgCanvas, 0, 0);
 
-    const layer = this._ensureShapeLayer();
-    const lc = layer.getContext('2d');
-    lc.globalAlpha = 1;
-    lc.globalCompositeOperation = 'source-over';
+    if (!isGeometricConcept(getActiveConceptId(this.variation))) {
+      drawConceptScene(this, ctx);
+    } else {
+      const layer = this._ensureShapeLayer();
+      const lc = layer.getContext('2d');
+      lc.globalAlpha = 1;
+      lc.globalCompositeOperation = 'source-over';
 
-    const sortedEntries = this.shapes
-      .map((s, i) => ({ s, i, depth: this._shapeDepth(s) }))
-      .sort((a, b) => a.depth - b.depth);
+      const sortedEntries = this.shapes
+        .map((s, i) => ({ s, i, depth: this._shapeDepth(s) }))
+        .sort((a, b) => a.depth - b.depth);
 
-    for (const { s, i } of sortedEntries) {
-      this._drawShapeLayer(lc, s, i);
-      ctx.drawImage(layer, 0, 0);
+      for (const { s, i } of sortedEntries) {
+        this._drawShapeLayer(lc, s, i);
+        ctx.drawImage(layer, 0, 0);
+      }
     }
 
     if (this._surpriseFlash > 0.01) {

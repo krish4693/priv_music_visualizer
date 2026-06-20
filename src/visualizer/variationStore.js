@@ -1,6 +1,9 @@
 export const VARIATION_STORAGE_KEY = 'visualizer-popart-variation-v1';
 
-export { SHAPE_OPTIONS } from './shapePresets.js';
+import { SHAPE_OPTIONS } from './shapePresets.js';
+import { normalizeVisualConcept } from './visualConceptStore.js';
+
+export { SHAPE_OPTIONS };
 
 export const ANIMATION_SPEEDS = [
   { value: 0.25, label: '¼×' },
@@ -40,6 +43,7 @@ export const COLOR_MODES = [
  * @property {number} cornerRound
  * @property {boolean} fixedLayout
  * @property {number} animationSpeed
+ * @property {import('./visualConceptStore.js').VisualConceptId} visualConcept
  */
 
 /** @type {VariationSettings} */
@@ -63,6 +67,7 @@ export const DEFAULT_VARIATION = {
   cornerRound: 50,
   fixedLayout: true,
   animationSpeed: 1,
+  visualConcept: 'geometric',
 };
 
 const VALID_ANIMATION_SPEEDS = new Set(ANIMATION_SPEEDS.map((s) => s.value));
@@ -102,6 +107,7 @@ export function cloneVariation(v) {
     cornerRound: v.cornerRound,
     fixedLayout: v.fixedLayout !== false,
     animationSpeed: normalizeAnimationSpeed(v.animationSpeed),
+    visualConcept: normalizeVisualConcept(v.visualConcept),
   };
 }
 
@@ -142,6 +148,7 @@ export function loadVariation() {
       cornerRound: clamp(Number(parsed.cornerRound) ?? DEFAULT_VARIATION.cornerRound, 0, 100),
       fixedLayout: parsed.fixedLayout !== false,
       animationSpeed: normalizeAnimationSpeed(parsed.animationSpeed),
+      visualConcept: normalizeVisualConcept(parsed.visualConcept),
     };
   } catch {
     return cloneVariation(DEFAULT_VARIATION);
