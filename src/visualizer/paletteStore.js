@@ -67,4 +67,39 @@ export function hexToRgb(hex) {
   return parseHex(hex);
 }
 
+/** Snapshot palette for preset export. */
+export function collectPalettePreset() {
+  const full = loadFullPalette();
+  const selected = loadSelectedIndices(full);
+  const baseKeys = new Set(POP_ART_COLORS.map(colorKey));
+  const customColors = full.filter((c) => !baseKeys.has(colorKey(c)));
+  const selectedKeys = [...selected].map((i) => colorKey(full[i])).filter(Boolean);
+  return { customColors, selectedKeys };
+}
+
+/**
+ * Restore palette from preset data.
+ * @returns {{ fullPalette: ReturnType<typeof loadFullPalette>, selectedPaletteIndices: Set<number> }}
+ */
+export function applyPalettePreset(raw) {
+  const base = POP_ART_COLORS.map((c) => ({ ...c }));
+  const customColors = Array.isArray(raw?.customColors)
+    ? raw.customColors.filter((c) => c && Number.isFinite(c.r) && Number.isFinite(c.g) && Number.isFinite(c.b))
+    : [];
+  const fullPalette = [...base, ...customColors.map((c) => ({ ...c }))];
+
+  let selectedPaletteIndices = new Set(fullPalette.map((_, i) => i));
+  if (Array.isArray(raw?.selectedKeys) && raw.selectedKeys.length) {
+    const next = new Set();
+    fullPalette.forEach((c, i) => {
+      if (raw.selectedKeys.includes(colorKey(c))) next.add(i);
+    });
+    if (next.size) selectedPaletteIndices = next;
+  }
+
+  saveCustomColors(customColors);
+  saveSelectedIndices(fullPalette, selectedPaletteIndices);
+  return { fullPalette, selectedPaletteIndices };
+}
+
 export { colorKey };

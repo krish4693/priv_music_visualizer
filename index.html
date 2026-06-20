@@ -8,232 +8,284 @@
   </head>
   <body>
     <div class="app">
-      <header>
+      <header class="app-header">
         <h1>Music Parameter Visualizer</h1>
-        <p class="subtitle">Route analyzed audio parameters (bass, mids, highs, volume, tempo) to generative 3D shapes — no image upload required.</p>
+        <p class="subtitle">Live preview while you tweak — parameters surround the video.</p>
       </header>
 
-      <section class="upload-section">
-        <p class="upload-label">Audio</p>
-        <label class="dropzone" id="dropzone" for="file-input">
-          <input type="file" id="file-input" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,.mp3,.wav" hidden />
-          <span class="dropzone-icon">♫</span>
-          <span class="dropzone-text">Drop MP3 / WAV or click</span>
-        </label>
-        <p class="file-name" id="file-name">No audio loaded</p>
-        <label class="title-field">
-          <span class="title-field-label">Song title</span>
-          <span class="title-field-hint">Extruded 3D letters on a shape — tumbling with it</span>
-          <input type="text" id="song-title-input" maxlength="80" placeholder="Track title" autocomplete="off" />
-          <label class="title-frequency">
-            <span class="title-frequency-label">Title frequency</span>
-            <span class="title-field-hint">How often the 3D title appears on a shape — rare ← → often</span>
-            <div class="title-frequency-row">
-              <input type="range" id="title-frequency-slider" min="0" max="100" step="1" aria-label="Title appearance frequency" />
-              <span class="title-frequency-val" id="title-frequency-val">45%</span>
+      <div class="studio">
+        <!-- TOP: audio, title, colors -->
+        <aside class="panel panel-top">
+          <section class="shapes-bar panel-inner">
+            <div class="shapes-bar-head">
+              <span class="variation-group-label">Shape types</span>
+              <div class="seed-controls">
+                <label class="variation-seed">
+                  <span>Seed</span>
+                  <input type="number" id="variation-seed" min="1" max="99999" step="1" aria-label="Variation seed" />
+                </label>
+                <button type="button" class="variation-save-seed-btn" id="variation-save-seed-btn">Save seed</button>
+                <button type="button" class="variation-copy-seed-btn" id="variation-copy-seed-btn" title="Copy seed number only">Copy seed</button>
+                <button type="button" class="variation-copy-preset-btn" id="variation-copy-preset-btn" title="Copy all settings to clipboard">Save look</button>
+                <button type="button" class="variation-load-preset-btn" id="variation-load-preset-btn" title="Paste a saved look code">Load look</button>
+                <button type="button" class="variation-new-btn" id="variation-new-btn">New seed</button>
+                <span class="seed-saved-hint" id="seed-saved-hint" hidden>Saved</span>
+              </div>
             </div>
-          </label>
-        </label>
-        <div class="progress-wrap" id="upload-progress-wrap" hidden>
-          <p class="progress-heading">Upload &amp; analysis</p>
-          <div class="progress-bar">
-            <div class="progress-fill upload-fill" id="upload-progress-fill"></div>
-          </div>
-          <p class="progress-label" id="upload-progress-label">Reading file…</p>
-          <p class="progress-percent" id="upload-progress-percent">0%</p>
-        </div>
-      </section>
+            <ol class="seed-note seed-steps">
+              <li><strong>Save look:</strong> tune everything → click <strong>Save look</strong> → code is copied</li>
+              <li><strong>Load look:</strong> click <strong>Load look</strong> → paste that long code</li>
+              <li><strong>Seed only</strong> (number): same shape positions — use Seed field + Save seed</li>
+            </ol>
+            <div class="shape-toggles shape-toggles-always" id="shape-toggles"></div>
+          </section>
 
-      <section class="mapping-section" id="mapping-section">
-        <div class="mapping-header">
-          <span class="mapping-title">Parameter mapping</span>
-          <span class="mapping-hint">Choose which analyzed audio signal drives each visual property.</span>
-        </div>
-        <div class="mapping-table-wrap">
-          <table class="mapping-table" id="mapping-table">
-            <thead>
-              <tr>
-                <th>Visual property</th>
-                <th>Audio source</th>
-                <th>Sensitivity</th>
-              </tr>
-            </thead>
-            <tbody id="mapping-body"></tbody>
-          </table>
-        </div>
-        <div class="mapping-controls">
-          <label class="viscosity-control">
-            <span class="viscosity-label">Global viscosity</span>
-            <span class="viscosity-hint">Higher = slower, smoother response to music</span>
-            <div class="viscosity-row">
-              <input type="range" id="viscosity-slider" min="0" max="100" step="1" value="38" aria-label="Global viscosity" />
-              <span class="viscosity-val" id="viscosity-val">38%</span>
+          <section class="upload-section panel-inner">
+            <div class="upload-top-row">
+              <div class="upload-audio">
+                <p class="upload-label">Audio</p>
+                <label class="dropzone dropzone-compact" id="dropzone" for="file-input">
+                  <input type="file" id="file-input" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,.mp3,.wav" hidden />
+                  <span class="dropzone-icon">♫</span>
+                  <span class="dropzone-text">Drop MP3 / WAV or click</span>
+                </label>
+                <p class="file-name" id="file-name">No audio loaded</p>
+              </div>
+              <label class="title-field title-field-compact">
+                <span class="title-field-label">Song title</span>
+                <input type="text" id="song-title-input" maxlength="80" placeholder="Track title" autocomplete="off" />
+                <label class="title-frequency">
+                  <span class="title-frequency-label">Title frequency</span>
+                  <div class="title-frequency-row">
+                    <input type="range" id="title-frequency-slider" min="0" max="100" step="1" aria-label="Title appearance frequency" />
+                    <span class="title-frequency-val" id="title-frequency-val">45%</span>
+                  </div>
+                </label>
+              </label>
             </div>
-          </label>
-        </div>
-        <button type="button" class="mapping-reset" id="mapping-reset">Reset to defaults</button>
-      </section>
+            <div class="progress-wrap" id="upload-progress-wrap" hidden>
+              <p class="progress-heading">Upload &amp; analysis</p>
+              <div class="progress-bar">
+                <div class="progress-fill upload-fill" id="upload-progress-fill"></div>
+              </div>
+              <p class="progress-label" id="upload-progress-label">Reading file…</p>
+              <p class="progress-percent" id="upload-progress-percent">0%</p>
+            </div>
+          </section>
 
-      <section class="palette-section">
-        <div class="palette-row" id="palette-row">
-          <div class="palette-header">
-            <span class="palette-label">Colors</span>
-            <span class="palette-hint">Click swatches to choose active colors</span>
-          </div>
-          <div class="palette-swatches" id="palette-swatches"></div>
-          <div class="palette-add">
-            <input type="color" id="color-picker" value="#00dcff" aria-label="Pick a custom color" />
-            <button type="button" id="add-color-btn">Add color</button>
-          </div>
-          <div class="palette-bg">
-            <label class="bg-color-label">
-              <span>Background</span>
-              <input type="color" id="bg-color-picker" value="#1c1c1e" aria-label="Background color" />
-            </label>
-          </div>
-        </div>
-      </section>
+          <section class="palette-section panel-inner">
+            <div class="palette-row" id="palette-row">
+              <div class="palette-header">
+                <span class="palette-label">Colors</span>
+                <span class="palette-hint">Click swatches to activate</span>
+              </div>
+              <div class="palette-swatches" id="palette-swatches"></div>
+              <div class="palette-actions">
+                <div class="palette-add">
+                  <input type="color" id="color-picker" value="#00dcff" aria-label="Pick a custom color" />
+                  <button type="button" id="add-color-btn">Add color</button>
+                </div>
+                <div class="palette-bg">
+                  <label class="bg-color-label">
+                    <span>Background</span>
+                    <input type="color" id="bg-color-picker" value="#1c1c1e" aria-label="Background color" />
+                  </label>
+                </div>
+              </div>
+            </div>
+          </section>
+        </aside>
 
-      <section class="variation-section" id="variation-section">
-        <div class="variation-header">
-          <span class="variation-title">Clip variation</span>
-          <span class="variation-hint">Shape mix, color cycling, and layout — each seed gives a slightly different look.</span>
-        </div>
+        <!-- LEFT: mapping -->
+        <aside class="panel panel-left">
+          <section class="mapping-section panel-inner" id="mapping-section">
+            <div class="mapping-header">
+              <span class="mapping-title">Parameter mapping</span>
+              <span class="mapping-hint">Audio → visual properties</span>
+            </div>
+            <div class="mapping-table-wrap">
+              <table class="mapping-table" id="mapping-table">
+                <thead>
+                  <tr>
+                    <th>Property</th>
+                    <th>Source</th>
+                    <th>Sens.</th>
+                    <th>In use</th>
+                  </tr>
+                </thead>
+                <tbody id="mapping-body"></tbody>
+              </table>
+            </div>
+            <div class="audio-sources-panel" id="audio-sources-panel">
+              <span class="audio-sources-title">Song analysis (live)</span>
+              <ul class="audio-sources-list" id="audio-sources-list"></ul>
+            </div>
+            <div class="mapping-controls">
+              <label class="viscosity-control">
+                <span class="viscosity-label">Global viscosity</span>
+                <div class="viscosity-row">
+                  <input type="range" id="viscosity-slider" min="0" max="100" step="1" value="38" aria-label="Global viscosity" />
+                  <span class="viscosity-val" id="viscosity-val">38%</span>
+                </div>
+              </label>
+            </div>
+            <button type="button" class="mapping-reset" id="mapping-reset">Reset mapping</button>
+          </section>
+        </aside>
 
-        <div class="variation-seed-row">
-          <label class="variation-seed">
-            <span>Seed</span>
-            <input type="number" id="variation-seed" min="1" max="99999" step="1" aria-label="Variation seed" />
-          </label>
-          <button type="button" class="variation-new-btn" id="variation-new-btn">New variation</button>
-        </div>
+        <!-- CENTER: video -->
+        <main class="panel panel-center">
+          <section class="canvas-section">
+            <div class="canvas-frame">
+              <canvas id="visualizer" width="1280" height="720"></canvas>
+            </div>
+            <div class="transport">
+              <button id="play-btn" disabled>Play</button>
+              <button id="stop-btn" disabled>Stop</button>
+              <label class="playhead-wrap">
+                <span class="sr-only">Timeline</span>
+                <input type="range" id="playhead-slider" min="0" max="0" step="0.01" value="0" disabled aria-label="Timeline playhead" />
+              </label>
+              <button id="record-btn" disabled title="Record parameter changes while playing">Record</button>
+              <button type="button" id="save-take-btn" disabled title="Save recording as a .vtake file">Save take</button>
+              <button type="button" id="load-take-btn" disabled title="Open a saved .vtake file">Load take</button>
+              <input type="file" id="load-take-input" accept=".vtake,.json,application/json" hidden aria-hidden="true" />
+              <button type="button" id="clear-automation-btn" disabled title="Delete recording">Clear</button>
+              <span class="automation-status" id="automation-status"></span>
+              <span id="time-display">0:00 / 0:00</span>
+            </div>
+            <p class="take-note">1. <strong>Record</strong> while playing · toggle <strong>Colors</strong> swatches too · 2. <strong>Save take</strong> · 3. <strong>Load take</strong> + Play</p>
+          </section>
+        </main>
 
-        <div class="variation-group">
-          <span class="variation-group-label">Shape types</span>
-          <div class="shape-toggles" id="shape-toggles"></div>
-        </div>
+        <!-- RIGHT: variation -->
+        <aside class="panel panel-right">
+          <section class="variation-section panel-inner" id="variation-section">
+            <div class="variation-header">
+              <span class="variation-title">Clip variation</span>
+              <span class="variation-hint">Motion, color &amp; layout</span>
+            </div>
 
-        <div class="variation-group">
-          <span class="variation-group-label">Surface</span>
-          <div class="surface-toggles">
-            <label class="shape-toggle" id="rounded-edges-toggle">
-              <input type="checkbox" id="rounded-edges-check" aria-label="Rounded edges" />
-              <span>Rounded edges</span>
-            </label>
-            <label class="shape-toggle active" id="kanten-toggle">
-              <input type="checkbox" id="kanten-check" checked aria-label="Kanten — edge outlines" />
-              <span>Kanten</span>
-            </label>
-          </div>
-          <span class="variation-field-hint">Flat faces by default — rounded edges soften corners &amp; curves; Kanten draws edge lines.</span>
-          <label class="variation-field">
-            <span class="variation-field-label">Corner roundness</span>
-            <span class="variation-field-hint">How soft corners and edges appear (with Rounded edges on)</span>
-            <div class="variation-slider-row">
-              <input type="range" id="corner-round-slider" min="0" max="100" step="1" aria-label="Corner roundness" />
-              <span class="variation-val" id="corner-round-val">45%</span>
+            <div class="variation-group">
+              <span class="variation-group-label">Surface</span>
+              <div class="surface-toggles">
+                <label class="shape-toggle" id="rounded-edges-toggle">
+                  <input type="checkbox" id="rounded-edges-check" aria-label="Rounded edges" />
+                  <span>Rounded edges</span>
+                </label>
+                <label class="shape-toggle active" id="kanten-toggle">
+                  <input type="checkbox" id="kanten-check" checked aria-label="Kanten — edge outlines" />
+                  <span>Kanten</span>
+                </label>
+              </div>
+              <label class="variation-field">
+                <span class="variation-field-label">Corner roundness</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="corner-round-slider" min="0" max="100" step="1" aria-label="Corner roundness" />
+                  <span class="variation-val" id="corner-round-val">45%</span>
+                </div>
+              </label>
             </div>
-          </label>
-        </div>
 
-        <div class="variation-grid">
-          <label class="variation-field">
-            <span class="variation-field-label">Color cycling</span>
-            <select id="color-mode-select" aria-label="Color cycling mode"></select>
-          </label>
-          <label class="variation-field">
-            <span class="variation-field-label">Color shift</span>
-            <span class="variation-field-hint">How much colors move (tempo / energy modes)</span>
-            <div class="variation-slider-row">
-              <input type="range" id="color-shift-slider" min="0" max="100" step="1" aria-label="Color shift intensity" />
-              <span class="variation-val" id="color-shift-val">65%</span>
+            <div class="variation-grid variation-grid-compact">
+              <label class="variation-field">
+                <span class="variation-field-label">Color cycling</span>
+                <div class="variation-select-row">
+                  <select id="color-mode-select" aria-label="Color cycling mode"></select>
+                  <span class="analysis-live-val" id="color-drive-val" title="Live value from song analysis">—</span>
+                </div>
+              </label>
+              <label class="variation-field">
+                <span class="variation-field-label">Color shift</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="color-shift-slider" min="0" max="100" step="1" aria-label="Color shift intensity" />
+                  <span class="variation-val" id="color-shift-val">65%</span>
+                </div>
+              </label>
+              <label class="variation-field">
+                <span class="variation-field-label">Shape count</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="shape-count-slider" min="8" max="28" step="1" aria-label="Number of shapes" />
+                  <span class="variation-val" id="shape-count-val">20</span>
+                </div>
+              </label>
+              <label class="variation-field">
+                <span class="variation-field-label">Size spread</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="size-spread-slider" min="0" max="100" step="1" aria-label="Size spread" />
+                  <span class="variation-val" id="size-spread-val">35%</span>
+                </div>
+              </label>
+              <label class="variation-field">
+                <span class="variation-field-label">Spin intensity</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="spin-intensity-slider" min="0" max="100" step="1" aria-label="Spin intensity" />
+                  <span class="variation-val" id="spin-intensity-val">50%</span>
+                </div>
+              </label>
+              <label class="variation-field">
+                <span class="variation-field-label">Layout spread</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="layout-spread-slider" min="0" max="100" step="1" aria-label="Layout spread" />
+                  <span class="variation-val" id="layout-spread-val">50%</span>
+                </div>
+              </label>
+              <label class="variation-field variation-field-full">
+                <label class="manual-speed-toggle">
+                  <input type="checkbox" id="fixed-layout-check" checked aria-label="Keep shapes in fixed positions" />
+                  <span>Fixed layout</span>
+                </label>
+                <p class="variation-hint">Off = shapes drift with the music (can look jumpy).</p>
+              </label>
+              <label class="variation-field">
+                <span class="variation-field-label">Depth range</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="depth-range-slider" min="0" max="100" step="1" aria-label="Depth range" />
+                  <span class="variation-val" id="depth-range-val">45%</span>
+                </div>
+              </label>
+              <label class="variation-field variation-field-full">
+                <label class="manual-speed-toggle">
+                  <input type="checkbox" id="manual-speed-check" aria-label="Use manual animation speed" />
+                  <span>Manual speed</span>
+                </label>
+                <div class="variation-slider-row">
+                  <input type="range" id="manual-speed-slider" min="0" max="250" step="1" aria-label="Manual animation speed" />
+                  <span class="variation-val" id="manual-speed-val">50%</span>
+                  <span class="analysis-live-val" id="motion-drive-val" title="Live motion value used in the scene">—</span>
+                </div>
+              </label>
+              <label class="variation-field variation-field-full">
+                <label class="manual-speed-toggle">
+                  <input type="checkbox" id="surprises-check" checked aria-label="Enable random surprises" />
+                  <span>Surprises</span>
+                </label>
+                <div class="variation-slider-row">
+                  <input type="range" id="surprise-rate-slider" min="0" max="100" step="1" aria-label="Surprise frequency" />
+                  <span class="variation-val" id="surprise-rate-val">55%</span>
+                </div>
+              </label>
             </div>
-          </label>
-          <label class="variation-field">
-            <span class="variation-field-label">Shape count</span>
-            <div class="variation-slider-row">
-              <input type="range" id="shape-count-slider" min="8" max="28" step="1" aria-label="Number of shapes" />
-              <span class="variation-val" id="shape-count-val">20</span>
-            </div>
-          </label>
-          <label class="variation-field">
-            <span class="variation-field-label">Size spread</span>
-            <span class="variation-field-hint">Random size differences between shapes</span>
-            <div class="variation-slider-row">
-              <input type="range" id="size-spread-slider" min="0" max="100" step="1" aria-label="Size spread" />
-              <span class="variation-val" id="size-spread-val">35%</span>
-            </div>
-          </label>
-          <label class="variation-field">
-            <span class="variation-field-label">Spin intensity</span>
-            <div class="variation-slider-row">
-              <input type="range" id="spin-intensity-slider" min="0" max="100" step="1" aria-label="Spin intensity" />
-              <span class="variation-val" id="spin-intensity-val">50%</span>
-            </div>
-          </label>
-          <label class="variation-field">
-            <span class="variation-field-label">Layout spread</span>
-            <span class="variation-field-hint">Tighter grid vs scattered placement</span>
-            <div class="variation-slider-row">
-              <input type="range" id="layout-spread-slider" min="0" max="100" step="1" aria-label="Layout spread" />
-              <span class="variation-val" id="layout-spread-val">50%</span>
-            </div>
-          </label>
-          <label class="variation-field">
-            <span class="variation-field-label">Depth range</span>
-            <span class="variation-field-hint">How far shapes move in 3D depth</span>
-            <div class="variation-slider-row">
-              <input type="range" id="depth-range-slider" min="0" max="100" step="1" aria-label="Depth range" />
-              <span class="variation-val" id="depth-range-val">45%</span>
-            </div>
-          </label>
-          <label class="variation-field variation-field-full">
-            <label class="manual-speed-toggle">
-              <input type="checkbox" id="manual-speed-check" aria-label="Use manual animation speed" />
-              <span>Manual animation speed</span>
-            </label>
-            <span class="variation-field-hint">Override music-driven motion with a fixed speed</span>
-            <div class="variation-slider-row">
-              <input type="range" id="manual-speed-slider" min="0" max="250" step="1" aria-label="Manual animation speed" />
-              <span class="variation-val" id="manual-speed-val">50%</span>
-            </div>
-          </label>
-          <label class="variation-field variation-field-full">
-            <label class="manual-speed-toggle">
-              <input type="checkbox" id="surprises-check" checked aria-label="Enable random surprises" />
-              <span>Random surprises</span>
-            </label>
-            <span class="variation-field-hint">Turbo bursts, spin pops, color jolts &amp; title flashes on beats</span>
-            <div class="variation-slider-row">
-              <input type="range" id="surprise-rate-slider" min="0" max="100" step="1" aria-label="Surprise frequency" />
-              <span class="variation-val" id="surprise-rate-val">55%</span>
-            </div>
-          </label>
-        </div>
 
-        <button type="button" class="variation-reset" id="variation-reset">Reset variation defaults</button>
-      </section>
+            <button type="button" class="variation-reset" id="variation-reset" title="Reset all variation sliders to defaults">Reset sliders</button>
+          </section>
+        </aside>
 
-      <section class="canvas-section">
-        <canvas id="visualizer" width="1280" height="720"></canvas>
-        <div class="transport">
-          <button id="play-btn" disabled>Play</button>
-          <button id="stop-btn" disabled>Stop</button>
-          <span id="time-display">0:00 / 0:00</span>
-        </div>
-      </section>
-
-      <section class="export-section">
-        <button id="export-btn" disabled>Export MP4 (720p)</button>
-        <div class="progress-wrap" id="create-progress-wrap" hidden>
-          <p class="progress-heading">Video creation</p>
-          <div class="progress-bar">
-            <div class="progress-fill create-fill" id="create-progress-fill"></div>
-          </div>
-          <p class="progress-label" id="create-progress-label">Preparing…</p>
-          <p class="progress-percent" id="create-progress-percent">0%</p>
-        </div>
-      </section>
+        <!-- BOTTOM: export -->
+        <footer class="panel panel-bottom">
+          <section class="export-section panel-inner">
+            <button id="export-btn" disabled>Export MP4 (720p)</button>
+            <div class="progress-wrap" id="create-progress-wrap" hidden>
+              <p class="progress-heading">Video creation</p>
+              <div class="progress-bar">
+                <div class="progress-fill create-fill" id="create-progress-fill"></div>
+              </div>
+              <p class="progress-label" id="create-progress-label">Preparing…</p>
+              <p class="progress-percent" id="create-progress-percent">0%</p>
+            </div>
+          </section>
+        </footer>
+      </div>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

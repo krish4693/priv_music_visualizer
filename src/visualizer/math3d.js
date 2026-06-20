@@ -543,7 +543,7 @@ export function flatMeshForPreset(kind, rx, ry, rz, round = 0, roundedEdges = fa
     return meshForPreset(kind, rx, ry, rz, 0);
   }
 
-  const effectiveRound = Math.min(1, Math.max(round, 0.1) + round * 0.45);
+  const effectiveRound = Math.min(0.72, Math.max(round, 0.1) + round * 0.35);
 
   switch (kind) {
     case 'ellipsoid':
@@ -560,8 +560,7 @@ export function flatMeshForPreset(kind, rx, ry, rz, round = 0, roundedEdges = fa
     case 'tetrahedron':
       return meshForPreset(kind, rx, ry, rz, 0);
     default:
-      if (effectiveRound >= 0.88) return buildEllipsoidMesh(rx, ry, rz);
-      if (effectiveRound > 0.06) return buildSuperellipsoidMesh(rx, ry, rz, effectiveRound);
-      return buildBoxMesh(rx, ry, rz);
+      if (effectiveRound <= 0.06) return buildBoxMesh(rx, ry, rz);
+      return buildSuperellipsoidMesh(rx, ry, rz, effectiveRound);
   }
 }

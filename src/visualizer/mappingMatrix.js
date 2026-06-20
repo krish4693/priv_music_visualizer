@@ -34,6 +34,11 @@ function clamp01(v) {
   return Math.min(1, Math.max(0, v));
 }
 
+export function formatAnalysisPercent(v) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  return `${Math.round(clamp01(v) * 100)}%`;
+}
+
 /** @returns {MappingMatrix} */
 export function loadMappingMatrix() {
   try {

@@ -1,5 +1,5 @@
 import { createAudioSourceState, extractAudioSources, resetAudioSourceState } from '../audio/sources.js';
-import { resolveMappedValues, DEFAULT_MAPPINGS } from './mappingMatrix.js';
+import { resolveMappedValues, DEFAULT_MAPPINGS, VISUAL_TARGETS } from './mappingMatrix.js';
 import { DEFAULT_VARIATION } from './variationStore.js';
 import { DEFAULT_BG } from './backgroundStore.js';
 import { SHAPE_PRESETS, getShapeKind } from './shapePresets.js';
@@ -104,6 +104,65 @@ export class PopArtScene {
     this._surpriseFlash = 0;
     this._surpriseCooldown = 1.5;
     this._surpriseTimer = 0;
+    this.liveAnalysis = null;
+    this._automationSample = null;
+  }
+
+  setAutomationSample(sample) {
+    this._automationSample = sample;
+  }
+
+  getLiveAnalysisState() {
+    return this.liveAnalysis;
+  }
+
+  _computeColorDrive(sources, frame) {
+    const shift = this.variation.colorShift / 100;
+    const mode = this.variation.colorMode;
+    if (mode === 'manual') return null;
+    if (mode === 'tempo') {
+      return Math.min(1, Math.max(0, (sources.tempoPhase ?? 0) * shift));
+    }
+    if (mode === 'energy') {
+      const amp = sources.amplitude ?? 0;
+      const pulse = frame.beatPulse ?? 0;
+      return Math.min(1, Math.max(0, amp * shift * 0.4 + this._beatFlash * shift * 0.6 + pulse * shift * 0.25));
+    }
+    return null;
+  }
+
+  _snapshotLiveAnalysis(sources, raw, frame, geo, mot, morph) {
+    const snapSources = this._automationSample?.sources ?? sources;
+    let colorDrive = this._computeColorDrive(snapSources, frame);
+    if (this._automationSample?.effective) {
+      colorDrive = this._automationSample.effective.color;
+    }
+    const manualMotion = !!this.variation.manualSpeed;
+    /** @type {Record<string, number|null>} */
+    const sourceInputs = {};
+    for (const { id } of VISUAL_TARGETS) {
+      const entry = this.mappings[id] ?? DEFAULT_MAPPINGS[id];
+      const src = entry?.source ?? 'none';
+      sourceInputs[id] = src === 'none' ? null : (snapSources[src] ?? 0);
+    }
+
+    this.liveAnalysis = {
+      sources: { ...snapSources },
+      mapped: { ...raw },
+      damped: { ...this.damped },
+      sourceInputs,
+      effective: {
+        geometry: geo,
+        color: colorDrive ?? this.damped.color,
+        motion: mot,
+        morphing: morph,
+      },
+      flags: {
+        manualMotion,
+        manualColor: this.variation.colorMode === 'manual',
+        colorFromMode: this.variation.colorMode !== 'manual',
+      },
+    };
   }
 
   setSongTitle(text) {
@@ -161,6 +220,8 @@ export class PopArtScene {
     const nextEnabled = [...this.variation.enabledShapes].sort().join(',');
     if (prevEnabled !== nextEnabled) {
       this.regenerate();
+    } else {
+      for (const s of this.shapes) this._enforceEnabledTypes(s);
     }
   }
 
@@ -218,6 +279,29 @@ export class PopArtScene {
     return options[Math.floor(rng() * options.length)];
   }
 
+  _enforceEnabledTypes(s) {
+    const enabled = new Set(this._enabledShapeIds());
+    if (enabled.has(s.type) && enabled.has(s.morphTarget)) return;
+
+    if (!enabled.has(s.type)) {
+      s.type = this._pickNextType(s.type);
+      const preset = SHAPE_PRESETS[s.type];
+      s.fromRx = preset.rx * s.sizeMul;
+      s.fromRy = preset.ry * s.sizeMul;
+      s.fromRz = preset.rz * s.sizeMul;
+      s.fromRound = preset.round ?? 0;
+    }
+
+    if (!enabled.has(s.morphTarget)) {
+      s.morphTarget = this._pickNextType(s.type);
+      const target = SHAPE_PRESETS[s.morphTarget];
+      s.toRx = target.rx * s.sizeMul;
+      s.toRy = target.ry * s.sizeMul;
+      s.toRz = target.rz * s.sizeMul;
+      s.toRound = target.round ?? 0;
+    }
+  }
+
   _initShapes(width, height) {
     const rng = this.rng;
     const count = Math.min(MAX_SHAPES, Math.max(MIN_SHAPES, this.variation.shapeCount));
@@ -237,10 +321,15 @@ export class PopArtScene {
       const zRange = 80 + depth * 200;
       const spinMul = 0.35 + spin * 0.85;
 
+      const z = (rng() - 0.5) * zRange * 2;
+
       return {
         x: pos.x,
         y: pos.y,
-        z: (rng() - 0.5) * zRange * 2,
+        z,
+        homeX: pos.x,
+        homeY: pos.y,
+        homeZ: z,
         vx: (rng() - 0.5) * 0.3,
         vy: (rng() - 0.5) * 0.3,
         vz: (rng() - 0.5) * 0.16 * (0.5 + depth),
@@ -395,9 +484,13 @@ export class PopArtScene {
         s.surpriseScale = 2.1 + this.rng() * 0.7;
         break;
       case 'slingshot':
-        s.vx += (this.rng() - 0.5) * 3.2;
-        s.vy += (this.rng() - 0.5) * 3.2;
-        s.vz += (this.rng() - 0.5) * 2.4;
+        if (!this.variation.fixedLayout) {
+          s.vx += (this.rng() - 0.5) * 3.2;
+          s.vy += (this.rng() - 0.5) * 3.2;
+          s.vz += (this.rng() - 0.5) * 2.4;
+        } else {
+          s.surpriseSpinBoost = 4 + this.rng() * 3;
+        }
         break;
       case 'morph-flip':
         this._snapMorphShape(s);
@@ -559,7 +652,19 @@ export class PopArtScene {
       this.damped[key] = lerp(this.damped[key], raw[key] ?? 0, dampRate);
     }
 
-    this._updateColorVariation(sources, frame, dt);
+    if (this._automationSample?.effective) {
+      const e = this._automationSample.effective;
+      this.damped.geometry = e.geometry;
+      this.damped.color = e.color;
+      this.damped.motion = e.motion;
+      this.damped.morphing = e.morphing;
+      if (this.variation.colorMode !== 'manual') {
+        const target = e.color * this.palette.length;
+        this.colorOffset = lerp(this.colorOffset, target, 0.12);
+      }
+    } else {
+      this._updateColorVariation(sources, frame, dt);
+    }
     this._updateSurprises(sources, frame, dt);
 
     const geo = this.damped.geometry;
@@ -582,56 +687,76 @@ export class PopArtScene {
     const rotRate = (0.24 + mot * 0.72) * spinMul;
     const breathe = 1 + geo * 0.22;
     const zLimit = 180 + depth * 140;
+    const fixedLayout = this.variation.fixedLayout !== false;
 
     for (const s of this.shapes) {
       s.targetScale = breathe + Math.sin(s.rotY * 0.5) * geo * 0.06;
       s.scale = lerp(s.scale, s.targetScale, 0.055);
 
-      const angle = s.rotY + mot * 0.9;
-      s.vx += Math.cos(angle) * mot * 0.012;
-      s.vy += Math.sin(angle * 0.7) * mot * 0.012;
-      s.vz += Math.sin(angle * 0.5) * mot * 0.008 * (0.6 + depth * 0.6);
-      s.vx *= drag;
-      s.vy *= drag;
-      s.vz *= drag;
+      if (fixedLayout) {
+        s.vx = 0;
+        s.vy = 0;
+        s.vz = 0;
+        s.x = s.homeX;
+        s.y = s.homeY;
+        s.z = s.homeZ;
+      } else {
+        const angle = s.rotY + mot * 0.9;
+        s.vx += Math.cos(angle) * mot * 0.012;
+        s.vy += Math.sin(angle * 0.7) * mot * 0.012;
+        s.vz += Math.sin(angle * 0.5) * mot * 0.008 * (0.6 + depth * 0.6);
+        s.vx *= drag;
+        s.vy *= drag;
+        s.vz *= drag;
 
-      s.x += s.vx * driftSpeed * dt;
-      s.y += s.vy * driftSpeed * dt;
-      s.z += s.vz * driftSpeed * dt * 0.85;
+        s.x += s.vx * driftSpeed * dt;
+        s.y += s.vy * driftSpeed * dt;
+        s.z += s.vz * driftSpeed * dt * 0.85;
+
+        const pad = 220;
+        if (s.x < -pad) s.x = this.width + pad;
+        if (s.x > this.width + pad) s.x = -pad;
+        if (s.y < -pad) s.y = this.height + pad;
+        if (s.y > this.height + pad) s.y = -pad;
+        if (s.z > zLimit) s.z = -zLimit;
+        if (s.z < -zLimit) s.z = zLimit;
+      }
 
       s.rotX += s.rotSpeedX * rotRate * dt * s.surpriseSpinBoost;
       s.rotY += s.rotSpeedY * rotRate * dt * s.surpriseSpinBoost;
       s.rotZ += s.rotSpeedZ * rotRate * dt * s.surpriseSpinBoost;
-
-      const pad = 220;
-      if (s.x < -pad) s.x = this.width + pad;
-      if (s.x > this.width + pad) s.x = -pad;
-      if (s.y < -pad) s.y = this.height + pad;
-      if (s.y > this.height + pad) s.y = -pad;
-      if (s.z > zLimit) s.z = -zLimit;
-      if (s.z < -zLimit) s.z = zLimit;
 
       s.morphT = Math.min(1, s.morphT + morphRate * dt);
       this._advanceMorph(s);
     }
 
     this._updateTitle(frame, dt);
+    this._snapshotLiveAnalysis(sources, raw, frame, geo, mot, morph);
   }
 
   _shapeRenderParams(s) {
     const t = easeInOut(s.morphT);
-    const kind = t < 0.5 ? getShapeKind(s.type) : getShapeKind(s.morphTarget);
+    const activeType = t < 0.5 ? s.type : s.morphTarget;
+    const kind = getShapeKind(activeType);
     const sizeScale = s.scale * (s.surpriseScale ?? 1);
     const rounded = !!this.variation.roundedEdges;
     const cornerAmt = (this.variation.cornerRound ?? 45) / 100;
-    const presetRound = lerp(s.fromRound, s.toRound, t);
-    const round = rounded ? Math.min(1, presetRound * 0.5 + cornerAmt * 0.92) : 0;
+
+    let round = 0;
+    if (rounded) {
+      if (kind === 'ellipsoid') {
+        round = Math.min(1, lerp(s.fromRound, s.toRound, t));
+      } else {
+        round = cornerAmt * 0.55;
+      }
+    }
+
     return {
       kind,
       rx: lerp(s.fromRx, s.toRx, t) * sizeScale,
       ry: lerp(s.fromRy, s.toRy, t) * sizeScale,
       rz: lerp(s.fromRz, s.toRz, t) * sizeScale,
-      round: rounded ? Math.min(1, presetRound * 0.5 + cornerAmt * 0.92) : 0,
+      round,
       roundedEdges: rounded,
     };
   }
@@ -670,7 +795,8 @@ export class PopArtScene {
     const offset = [s.x - w / 2, s.y - h / 2, s.z];
     const rot = [s.rotX, s.rotY, s.rotZ];
     const colorIdx = this._effectiveColorIdx(s);
-    const baseFill = popArtColor(this.palette, colorIdx, 0, 1);
+    const colorBlend = colorIdx - Math.floor(colorIdx);
+    const baseFill = popArtColor(this.palette, colorIdx, colorBlend, 1);
     const drawables = [];
     const showEdges = !!this.variation.kanten;
 

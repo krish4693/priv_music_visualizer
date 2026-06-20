@@ -113,6 +113,18 @@ export function resetRenderer(width = WIDTH, height = HEIGHT) {
   applySceneSettings();
 }
 
+export function getLiveAnalysisState() {
+  return scene?.getLiveAnalysisState?.() ?? null;
+}
+
+export function setAutomationSample(sample) {
+  scene?.setAutomationSample(sample ?? null);
+}
+
+export function clearAutomationSample() {
+  scene?.setAutomationSample(null);
+}
+
 export function drawFrame(ctx, frame, _title = '') {
   if (!scene) {
     scene = new PopArtScene(ctx.canvas.width || WIDTH, ctx.canvas.height || HEIGHT);

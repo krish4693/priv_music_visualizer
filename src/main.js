@@ -1,9 +1,12 @@
-import { analyzeAudioBuffer, decodeAudioFile, liveFrameFromAnalyser, resetLiveBeatState } from './audio/analyzer.js';
+import { analyzeAudioBuffer, decodeAudioFile, liveFrameFromAnalyser, resetLiveBeatState, FPS } from './audio/analyzer.js';
 import {
   drawFrame,
   drawBackdrop,
   resetRenderer,
   resetPlayhead,
+  getLiveAnalysisState,
+  setAutomationSample,
+  clearAutomationSample,
   setMappingMatrix,
   setViscosity,
   setVisualizerPalette,
@@ -23,6 +26,7 @@ import {
   loadViscosity,
   saveViscosity,
   cloneMappings,
+  formatAnalysisPercent,
 } from './visualizer/mappingMatrix.js';
 import { exportToMp4 } from './export/ffmpegExport.js';
 import { saveAudio, loadAudio } from './storage/db.js';
@@ -35,6 +39,7 @@ import {
   getActivePalette,
   hexToRgb,
   colorKey,
+  applyPalettePreset,
 } from './visualizer/paletteStore.js';
 import {
   SHAPE_OPTIONS,
@@ -45,6 +50,13 @@ import {
   cloneVariation,
   randomizeVariationSeed,
 } from './visualizer/variationStore.js';
+import {
+  AutomationRecorder,
+  downloadAutomationTake,
+  parseAutomationDocument,
+  suggestTakeFilename,
+} from './visualizer/automationStore.js';
+import { collectAppPreset, encodePreset, parsePresetInput } from './visualizer/presetStore.js';
 import { loadBackgroundColor, saveBackgroundColor } from './visualizer/backgroundStore.js';
 import { loadSongTitle, saveSongTitle, titleFromFilename, loadTitleFrequency, saveTitleFrequency } from './visualizer/titleStore.js';
 
@@ -60,6 +72,13 @@ const titleFrequencyVal = document.getElementById('title-frequency-val');
 const canvas = document.getElementById('visualizer');
 const playBtn = document.getElementById('play-btn');
 const stopBtn = document.getElementById('stop-btn');
+const playheadSlider = document.getElementById('playhead-slider');
+const recordBtn = document.getElementById('record-btn');
+const saveTakeBtn = document.getElementById('save-take-btn');
+const loadTakeBtn = document.getElementById('load-take-btn');
+const loadTakeInput = document.getElementById('load-take-input');
+const clearAutomationBtn = document.getElementById('clear-automation-btn');
+const automationStatus = document.getElementById('automation-status');
 const timeDisplay = document.getElementById('time-display');
 const exportBtn = document.getElementById('export-btn');
 const uploadProgressWrap = document.getElementById('upload-progress-wrap');
@@ -72,6 +91,9 @@ const createProgressLabel = document.getElementById('create-progress-label');
 const createProgressPercent = document.getElementById('create-progress-percent');
 const mappingBody = document.getElementById('mapping-body');
 const mappingResetBtn = document.getElementById('mapping-reset');
+const audioSourcesList = document.getElementById('audio-sources-list');
+const colorDriveVal = document.getElementById('color-drive-val');
+const motionDriveVal = document.getElementById('motion-drive-val');
 const viscositySlider = document.getElementById('viscosity-slider');
 const viscosityVal = document.getElementById('viscosity-val');
 const paletteSwatches = document.getElementById('palette-swatches');
@@ -80,6 +102,11 @@ const addColorBtn = document.getElementById('add-color-btn');
 const bgColorPicker = document.getElementById('bg-color-picker');
 const variationSeedInput = document.getElementById('variation-seed');
 const variationNewBtn = document.getElementById('variation-new-btn');
+const variationSaveSeedBtn = document.getElementById('variation-save-seed-btn');
+const variationCopySeedBtn = document.getElementById('variation-copy-seed-btn');
+const variationCopyPresetBtn = document.getElementById('variation-copy-preset-btn');
+const variationLoadPresetBtn = document.getElementById('variation-load-preset-btn');
+const seedSavedHint = document.getElementById('seed-saved-hint');
 const shapeToggles = document.getElementById('shape-toggles');
 const colorModeSelect = document.getElementById('color-mode-select');
 const colorShiftSlider = document.getElementById('color-shift-slider');
@@ -92,6 +119,7 @@ const spinIntensitySlider = document.getElementById('spin-intensity-slider');
 const spinIntensityVal = document.getElementById('spin-intensity-val');
 const layoutSpreadSlider = document.getElementById('layout-spread-slider');
 const layoutSpreadVal = document.getElementById('layout-spread-val');
+const fixedLayoutCheck = document.getElementById('fixed-layout-check');
 const depthRangeSlider = document.getElementById('depth-range-slider');
 const depthRangeVal = document.getElementById('depth-range-val');
 const manualSpeedCheck = document.getElementById('manual-speed-check');
@@ -112,6 +140,8 @@ const ctx = canvas.getContext('2d');
 
 let fullPalette = loadFullPalette();
 let selectedPaletteIndices = loadSelectedIndices(fullPalette);
+/** @type {string|null} */
+let lastAutomationPaletteSig = null;
 
 let audioFile = null;
 let audioBuffer = null;
@@ -124,6 +154,9 @@ let previewRAF = null;
 let isPlaying = false;
 let playStartTime = 0;
 let playOffset = 0;
+
+const automation = new AutomationRecorder();
+let mappingPanel = null;
 
 const ACCEPTED_EXTENSIONS = /\.(mp3|wav)$/i;
 const ACCEPTED_MIME_TYPES = new Set([
@@ -148,9 +181,11 @@ setupDropzone();
 fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
 playBtn.addEventListener('click', togglePlay);
 stopBtn.addEventListener('click', stopPlayback);
+setupPlayheadControl();
+setupAutomationControls();
 exportBtn.addEventListener('click', handleExport);
 
-setupMappingPanel();
+mappingPanel = setupMappingPanel();
 setupPaletteControls();
 setupBackgroundControl();
 setupSongTitleControl();
@@ -257,7 +292,9 @@ async function processAudioFile(file, persist, displayName) {
     stopBtn.disabled = false;
     exportBtn.disabled = false;
     updateTimeDisplay(0, audioBuffer.duration);
-    drawIdleFrame();
+    syncPlayheadSlider(0, audioBuffer.duration);
+    previewAtPlayhead();
+    syncAutomationControls();
     setUploadProgress(100, 'Ready to play');
   } catch (err) {
     console.error(err);
@@ -269,10 +306,258 @@ async function processAudioFile(file, persist, displayName) {
   }
 }
 
+function updateAnalysisDisplays() {
+  mappingPanel?.updateLiveValues?.();
+}
+
+function snapshotPaletteForAutomation() {
+  const baseKeys = new Set(POP_ART_COLORS.map(colorKey));
+  return {
+    selectedKeys: [...selectedPaletteIndices].map((i) => colorKey(fullPalette[i])).filter(Boolean),
+    customColors: fullPalette.filter((c) => !baseKeys.has(colorKey(c))).map((c) => ({ ...c })),
+  };
+}
+
+function notifyAutomationEdit() {
+  if (automation.isRecording) {
+    captureAutomationKeyframe(getCurrentSongTime(), true);
+  }
+}
+
+function applyAutomationPalette(palette) {
+  if (!palette?.selectedKeys?.length) return;
+  const sig = [...palette.selectedKeys].sort().join('|');
+  if (sig === lastAutomationPaletteSig) return;
+  lastAutomationPaletteSig = sig;
+  const paletteState = applyPalettePreset(palette);
+  fullPalette = paletteState.fullPalette;
+  selectedPaletteIndices = paletteState.selectedPaletteIndices;
+  renderPaletteSwatches();
+  applyActivePalette();
+}
+
+function clearAutomationPaletteCache() {
+  lastAutomationPaletteSig = null;
+}
+
+function buildAutomationCaptureState() {
+  const live = getLiveAnalysisState();
+  if (!live) return null;
+  return {
+    effective: { ...live.effective },
+    sources: { ...live.sources },
+    mappings: mappingPanel?.getMappings() ?? loadMappingMatrix(),
+    viscosity: mappingPanel?.getViscosity() ?? loadViscosity(),
+    palette: snapshotPaletteForAutomation(),
+  };
+}
+
+function captureAutomationKeyframe(time, force = false) {
+  const state = buildAutomationCaptureState();
+  if (!state) return;
+  automation.capture(time, state, force);
+  updateAutomationStatus();
+}
+
+function applyAutomationAtTime(time, syncUi = false) {
+  if (!automation.isActive) {
+    clearAutomationSample();
+    return;
+  }
+  const sample = automation.sampleAt(time);
+  if (!sample) {
+    clearAutomationSample();
+    return;
+  }
+  setAutomationSample(sample);
+  setViscosity(sample.viscosity);
+  setMappingMatrix(sample.mappings);
+  applyAutomationPalette(sample.palette);
+  if (syncUi) {
+    mappingPanel?.applyAutomationState?.({
+      mappings: sample.mappings,
+      viscosity: sample.viscosity,
+    });
+  }
+}
+
+function updateAutomationStatus() {
+  if (!automationStatus) return;
+  if (automation.isRecording) {
+    automationStatus.textContent = `Recording… ${automation.count}`;
+    return;
+  }
+  if (!automation.count) {
+    automationStatus.textContent = '';
+    return;
+  }
+  automationStatus.textContent = `Take: ${automation.count} points`;
+}
+
+function syncAutomationControls() {
+  const hasAudio = !!audioBuffer;
+  const hasTake = automation.count > 0;
+  recordBtn.disabled = !hasAudio;
+  saveTakeBtn.disabled = !hasTake || automation.isRecording;
+  loadTakeBtn.disabled = !hasAudio;
+  clearAutomationBtn.disabled = !hasTake;
+  recordBtn.classList.toggle('recording', automation.isRecording);
+  recordBtn.textContent = automation.isRecording ? 'Stop' : 'Record';
+  updateAutomationStatus();
+}
+
+function setupAutomationControls() {
+  recordBtn?.addEventListener('click', async () => {
+    if (!audioBuffer) return;
+
+    if (automation.isRecording) {
+      automation.stop();
+      syncAutomationControls();
+      if (automation.count) {
+        flashAutomationHint('Take ready — Save take to keep it');
+      }
+      if (!isPlaying) previewAtPlayhead();
+      return;
+    }
+
+    automation.clear();
+    clearAutomationSample();
+    clearAutomationPaletteCache();
+    automation.start();
+    syncAutomationControls();
+    captureAutomationKeyframe(getCurrentSongTime(), true);
+
+    if (!isPlaying) {
+      await togglePlay();
+    }
+  });
+
+  saveTakeBtn?.addEventListener('click', () => {
+    if (!automation.count) return;
+    const filename = suggestTakeFilename(audioFile?.name);
+
+    downloadAutomationTake(automation.exportData(), filename, {
+      song: audioFile?.name || '',
+    });
+    flashAutomationHint(`Saved ${filename}`);
+  });
+
+  loadTakeBtn?.addEventListener('click', () => {
+    loadTakeInput?.click();
+  });
+
+  loadTakeInput?.addEventListener('change', async () => {
+    const file = loadTakeInput.files?.[0];
+    loadTakeInput.value = '';
+    if (!file) return;
+
+    let keyframes;
+    try {
+      keyframes = parseAutomationDocument(await file.text());
+    } catch {
+      alert('Could not read take file.');
+      return;
+    }
+
+    if (!keyframes?.length) {
+      alert('Invalid take file.');
+      return;
+    }
+
+    automation.loadKeyframes(keyframes);
+    clearAutomationPaletteCache();
+    syncAutomationControls();
+    previewAtPlayhead();
+    flashAutomationHint(`Loaded ${file.name} (${keyframes.length} points)`);
+  });
+
+  clearAutomationBtn?.addEventListener('click', () => {
+    automation.clear();
+    clearAutomationSample();
+    clearAutomationPaletteCache();
+    syncAutomationControls();
+    if (!isPlaying) previewAtPlayhead();
+  });
+}
+
+function flashAutomationHint(message) {
+  if (!automationStatus) return;
+  automationStatus.textContent = message;
+  clearTimeout(flashAutomationHint._t);
+  flashAutomationHint._t = setTimeout(updateAutomationStatus, 2800);
+}
+
+function getCurrentSongTime() {
+  if (isPlaying && audioContext) {
+    return playOffset + (audioContext.currentTime - playStartTime);
+  }
+  return playOffset;
+}
+
+function syncPlayheadSlider(current, total) {
+  if (!playheadSlider) return;
+  playheadSlider.disabled = !audioBuffer || !total;
+  if (!audioBuffer || !total) return;
+  playheadSlider.max = String(total);
+  playheadSlider.value = String(Math.min(total, Math.max(0, current)));
+}
+
+function analysisFrameAtTime(seconds) {
+  if (!analysis?.frames?.length) return null;
+  const idx = Math.min(analysis.frames.length - 1, Math.floor(seconds * FPS));
+  return analysis.frames[idx];
+}
+
+function previewAtPlayhead() {
+  applyAutomationAtTime(playOffset, true);
+  drawBackdrop(ctx);
+  const frame = analysisFrameAtTime(playOffset);
+  if (frame) {
+    resetPlayhead();
+    const payload = { ...frame, time: playOffset };
+    for (let i = 0; i < 8; i++) drawFrame(ctx, payload);
+  } else {
+    drawFrame(ctx, { ...silentFrame(), time: 0 });
+  }
+  updateAnalysisDisplays();
+}
+
+function seekToTime(seconds) {
+  if (!audioBuffer) return;
+  playOffset = Math.min(audioBuffer.duration, Math.max(0, seconds));
+  syncPlayheadSlider(playOffset, audioBuffer.duration);
+  updateTimeDisplay(playOffset, audioBuffer.duration);
+
+  if (isPlaying) {
+    restartPlaybackAtOffset();
+  } else {
+    previewAtPlayhead();
+  }
+}
+
+function restartPlaybackAtOffset() {
+  if (!audioContext || !audioBuffer) return;
+  sourceNode?.stop();
+  sourceNode = null;
+  sourceNode = audioContext.createBufferSource();
+  sourceNode.buffer = audioBuffer;
+  sourceNode.connect(analyserNode);
+  sourceNode.onended = () => {
+    if (isPlaying) stopPlayback();
+  };
+  playStartTime = audioContext.currentTime;
+  sourceNode.start(0, playOffset);
+}
+
+function setupPlayheadControl() {
+  playheadSlider?.addEventListener('input', () => {
+    seekToTime(Number(playheadSlider.value));
+  });
+}
+
 function refreshPreview() {
   if (!audioBuffer || isPlaying) return;
-  drawBackdrop(ctx);
-  drawIdleFrame();
+  previewAtPlayhead();
 }
 
 function setupMappingPanel() {
@@ -282,12 +567,14 @@ function setupMappingPanel() {
   function applyMappings() {
     saveMappingMatrix(mappings);
     setMappingMatrix(mappings);
+    notifyAutomationEdit();
     refreshPreview();
   }
 
   function applyViscosity() {
     saveViscosity(viscosity);
     setViscosity(viscosity);
+    notifyAutomationEdit();
     refreshPreview();
   }
 
@@ -315,6 +602,10 @@ function setupMappingPanel() {
             <input type="range" class="mapping-sens" data-target="${id}"
               min="0" max="200" step="5" value="${sensPct}" aria-label="${label} sensitivity" />
             <span class="mapping-sens-val" data-target="${id}">${sensPct}%</span>
+          </td>
+          <td class="mapping-live-cell">
+            <span class="mapping-live-val" data-target="${id}">—</span>
+            <span class="mapping-live-src" data-target="${id}"></span>
           </td>
         </tr>`;
     }).join('');
@@ -350,6 +641,87 @@ function setupMappingPanel() {
   });
 
   renderMappingTable();
+
+  if (audioSourcesList && !audioSourcesList.childElementCount) {
+    audioSourcesList.innerHTML = AUDIO_SOURCES.filter(({ id }) => id !== 'none').map(({ id, label }) => `
+      <li class="audio-source-row" data-source="${id}">
+        <span class="audio-source-label">${label}</span>
+        <div class="audio-source-bar" aria-hidden="true"><div class="audio-source-fill"></div></div>
+        <span class="audio-source-pct">0%</span>
+      </li>
+    `).join('');
+  }
+
+  function updateLiveValues() {
+    const live = getLiveAnalysisState();
+    if (!live) return;
+
+    for (const { id } of VISUAL_TARGETS) {
+      const valEl = mappingBody.querySelector(`.mapping-live-val[data-target="${id}"]`);
+      const srcEl = mappingBody.querySelector(`.mapping-live-src[data-target="${id}"]`);
+      if (!valEl) continue;
+
+      let display = formatAnalysisPercent(live.effective[id]);
+      if (id === 'color' && live.flags.manualColor) display = 'manual';
+      else if (id === 'color' && live.flags.colorFromMode) display = formatAnalysisPercent(live.effective.color);
+      if ((id === 'motion' || id === 'morphing') && live.flags.manualMotion) display += ' · manual';
+
+      valEl.textContent = display;
+
+      if (srcEl) {
+        const srcVal = live.sourceInputs[id];
+        srcEl.textContent = srcVal == null ? '' : `← ${formatAnalysisPercent(srcVal)}`;
+      }
+    }
+
+    audioSourcesList?.querySelectorAll('[data-source]').forEach((row) => {
+      const key = row.dataset.source;
+      const v = live.sources[key] ?? 0;
+      const pct = Math.round(v * 100);
+      const fill = row.querySelector('.audio-source-fill');
+      const label = row.querySelector('.audio-source-pct');
+      if (fill) fill.style.width = `${pct}%`;
+      if (label) label.textContent = `${pct}%`;
+    });
+
+    if (colorDriveVal) {
+      if (live.flags.manualColor) colorDriveVal.textContent = 'manual';
+      else colorDriveVal.textContent = formatAnalysisPercent(live.effective.color);
+    }
+
+    if (motionDriveVal) {
+      motionDriveVal.textContent = live.flags.manualMotion
+        ? `${formatAnalysisPercent(live.effective.motion)} · manual`
+        : formatAnalysisPercent(live.effective.motion);
+    }
+  }
+
+  return {
+    applyPresetState({ mappings: nextMappings, viscosity: nextViscosity }) {
+      mappings = cloneMappings(nextMappings);
+      viscosity = nextViscosity;
+      viscositySlider.value = String(Math.round(viscosity * 100));
+      viscosityVal.textContent = `${viscositySlider.value}%`;
+      saveViscosity(viscosity);
+      saveMappingMatrix(mappings);
+      setViscosity(viscosity);
+      setMappingMatrix(mappings);
+      renderMappingTable();
+      refreshPreview();
+    },
+    applyAutomationState({ mappings: nextMappings, viscosity: nextViscosity }) {
+      mappings = cloneMappings(nextMappings);
+      viscosity = nextViscosity;
+      viscositySlider.value = String(Math.round(viscosity * 100));
+      viscosityVal.textContent = `${viscositySlider.value}%`;
+      setViscosity(viscosity);
+      setMappingMatrix(mappings);
+      renderMappingTable();
+    },
+    getMappings: () => cloneMappings(mappings),
+    getViscosity: () => viscosity,
+    updateLiveValues,
+  };
 }
 
 function getCustomColors() {
@@ -387,6 +759,8 @@ function togglePaletteColor(index) {
   saveSelectedIndices(fullPalette, selectedPaletteIndices);
   applyActivePalette();
   renderPaletteSwatches();
+  notifyAutomationEdit();
+  refreshPreview();
 }
 
 function setupPaletteControls() {
@@ -409,6 +783,8 @@ function setupPaletteControls() {
     saveSelectedIndices(fullPalette, selectedPaletteIndices);
     applyActivePalette();
     renderPaletteSwatches();
+    notifyAutomationEdit();
+    refreshPreview();
   });
 }
 
@@ -422,6 +798,7 @@ function setupBackgroundControl() {
     } else {
       drawBackdrop(ctx);
       drawFrame(ctx, silentFrame());
+      updateAnalysisDisplays();
     }
   });
 }
@@ -506,12 +883,24 @@ function setupVariationPanel() {
   }
 
   function bindSlider(slider, key, suffix = '%', needsRegenerate = false) {
+    const valEl = document.getElementById(`${slider.id.replace('-slider', '-val')}`);
+    const updateLabel = () => {
+      if (valEl) valEl.textContent = suffix === '' ? String(variation[key]) : `${variation[key]}${suffix}`;
+    };
+
     slider.addEventListener('input', () => {
       variation[key] = Number(slider.value);
-      const valEl = document.getElementById(`${slider.id.replace('-slider', '-val')}`);
-      if (valEl) valEl.textContent = suffix === '' ? String(variation[key]) : `${variation[key]}${suffix}`;
-      applyVariation(needsRegenerate);
+      updateLabel();
+      applyVariation(false);
     });
+
+    if (needsRegenerate) {
+      slider.addEventListener('change', () => {
+        variation[key] = Number(slider.value);
+        updateLabel();
+        applyVariation(true);
+      });
+    }
   }
 
   variationSeedInput.value = String(variation.seed);
@@ -520,6 +909,7 @@ function setupVariationPanel() {
   sizeSpreadSlider.value = String(variation.sizeSpread);
   spinIntensitySlider.value = String(variation.spinIntensity);
   layoutSpreadSlider.value = String(variation.layoutSpread);
+  fixedLayoutCheck.checked = variation.fixedLayout !== false;
   depthRangeSlider.value = String(variation.depthRange);
   manualSpeedCheck.checked = variation.manualSpeed;
   manualSpeedSlider.value = String(variation.manualSpeedValue);
@@ -534,19 +924,153 @@ function setupVariationPanel() {
   renderShapeToggles();
   syncSliderLabels();
 
-  variationSeedInput.addEventListener('change', () => {
+  function applySeed(regenerate = true) {
     const v = Math.max(1, Math.min(99999, Math.floor(Number(variationSeedInput.value) || variation.seed)));
     variation.seed = v;
     variationSeedInput.value = String(v);
-    regenerateOnNextApply = true;
-    applyVariation(true);
+    saveVariation(variation);
+    setVariationSettings(variation);
+    resetPlayhead();
+    if (regenerate) {
+      regenerateVariation();
+    } else {
+      refreshPreview();
+    }
+  }
+
+  function flashSeedSaved(message = 'Saved') {
+    if (!seedSavedHint) return;
+    seedSavedHint.textContent = message;
+    seedSavedHint.hidden = false;
+    clearTimeout(flashSeedSaved._t);
+    flashSeedSaved._t = setTimeout(() => {
+      seedSavedHint.hidden = true;
+      seedSavedHint.textContent = 'Saved';
+    }, 2200);
+  }
+
+  function syncVariationUI() {
+    variationSeedInput.value = String(variation.seed);
+    colorShiftSlider.value = String(variation.colorShift);
+    shapeCountSlider.value = String(variation.shapeCount);
+    sizeSpreadSlider.value = String(variation.sizeSpread);
+    spinIntensitySlider.value = String(variation.spinIntensity);
+    layoutSpreadSlider.value = String(variation.layoutSpread);
+    fixedLayoutCheck.checked = variation.fixedLayout !== false;
+    depthRangeSlider.value = String(variation.depthRange);
+    manualSpeedCheck.checked = variation.manualSpeed;
+    manualSpeedSlider.value = String(variation.manualSpeedValue);
+    surprisesCheck.checked = variation.surprises;
+    surpriseRateSlider.value = String(variation.surpriseRate);
+    roundedEdgesCheck.checked = variation.roundedEdges;
+    roundedEdgesToggle?.classList.toggle('active', variation.roundedEdges);
+    kantenCheck.checked = variation.kanten;
+    kantenToggle?.classList.toggle('active', variation.kanten);
+    cornerRoundSlider.value = String(variation.cornerRound);
+    colorModeSelect.value = variation.colorMode;
+    renderColorModeSelect();
+    renderShapeToggles();
+    syncSliderLabels();
+  }
+
+  function applyFullPreset(preset) {
+    variation = cloneVariation(preset.variation);
+    saveVariation(variation);
+    setVariationSettings(variation);
+    regenerateVariation();
+    syncVariationUI();
+
+    mappingPanel.applyPresetState({
+      mappings: preset.mappings,
+      viscosity: preset.viscosity,
+    });
+
+    saveBackgroundColor(preset.bgColor);
+    setBackgroundColor(preset.bgColor);
+    bgColorPicker.value = preset.bgColor;
+
+    saveSongTitle(preset.title);
+    setSongTitle(preset.title);
+    songTitleInput.value = preset.title;
+
+    saveTitleFrequency(preset.titleFrequency);
+    setTitleFrequency(preset.titleFrequency);
+    titleFrequencySlider.value = String(preset.titleFrequency);
+    titleFrequencyVal.textContent = `${preset.titleFrequency}%`;
+
+    const paletteState = applyPalettePreset(preset.palette);
+    fullPalette = paletteState.fullPalette;
+    selectedPaletteIndices = paletteState.selectedPaletteIndices;
+    renderPaletteSwatches();
+    applyActivePalette();
+
+    resetPlayhead();
+    refreshPreview();
+    flashSeedSaved('Look loaded');
+  }
+
+  function saveSeedNow() {
+    applySeed(true);
+    flashSeedSaved();
+  }
+
+  variationSeedInput.addEventListener('change', () => saveSeedNow());
+
+  variationSeedInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveSeedNow();
+    }
+  });
+
+  variationSaveSeedBtn?.addEventListener('click', () => saveSeedNow());
+
+  variationCopySeedBtn?.addEventListener('click', async () => {
+    const text = String(variation.seed);
+    try {
+      await navigator.clipboard.writeText(text);
+      flashSeedSaved('Seed copied');
+    } catch {
+      variationSeedInput.select();
+    }
+  });
+
+  variationCopyPresetBtn?.addEventListener('click', async () => {
+    const code = encodePreset(collectAppPreset());
+    try {
+      await navigator.clipboard.writeText(code);
+      flashSeedSaved('Look saved — paste via Load look');
+    } catch {
+      window.prompt('Copy this look code:', code);
+    }
+  });
+
+  variationLoadPresetBtn?.addEventListener('click', () => {
+    const code = window.prompt('Paste the long code from Save look:');
+    if (!code) return;
+    const result = parsePresetInput(code);
+    if (result.kind === 'full') {
+      applyFullPreset(result.preset);
+      return;
+    }
+    if (result.kind === 'seed') {
+      variationSeedInput.value = String(result.seed);
+      applySeed(true);
+      flashSeedSaved('Seed loaded — use Save look for full style');
+      return;
+    }
+    alert('Invalid code. Click Save look first, then paste that long code here.');
   });
 
   variationNewBtn.addEventListener('click', () => {
     variation = randomizeVariationSeed(variation);
     variationSeedInput.value = String(variation.seed);
-    regenerateOnNextApply = true;
-    applyVariation(true);
+    saveVariation(variation);
+    setVariationSettings(variation);
+    resetPlayhead();
+    regenerateVariation();
+    refreshPreview();
+    flashSeedSaved();
   });
 
   colorModeSelect.addEventListener('change', () => {
@@ -561,6 +1085,12 @@ function setupVariationPanel() {
   bindSlider(spinIntensitySlider, 'spinIntensity', '%', false);
   bindSlider(layoutSpreadSlider, 'layoutSpread', '%', true);
   bindSlider(depthRangeSlider, 'depthRange', '%', true);
+
+  fixedLayoutCheck.addEventListener('change', () => {
+    variation.fixedLayout = fixedLayoutCheck.checked;
+    applyVariation(false);
+  });
+
   bindSlider(manualSpeedSlider, 'manualSpeedValue', '%', false);
 
   manualSpeedCheck.addEventListener('change', () => {
@@ -600,6 +1130,7 @@ function setupVariationPanel() {
     sizeSpreadSlider.value = String(variation.sizeSpread);
     spinIntensitySlider.value = String(variation.spinIntensity);
     layoutSpreadSlider.value = String(variation.layoutSpread);
+    fixedLayoutCheck.checked = variation.fixedLayout !== false;
     depthRangeSlider.value = String(variation.depthRange);
     manualSpeedCheck.checked = variation.manualSpeed;
     manualSpeedSlider.value = String(variation.manualSpeedValue);
@@ -613,18 +1144,18 @@ function setupVariationPanel() {
     colorModeSelect.value = variation.colorMode;
     renderShapeToggles();
     regenerateOnNextApply = true;
+    resetPlayhead();
     applyVariation(true);
   });
 }
 
 function drawIdleFrame() {
-  if (analysis?.frames?.length) {
-    const idx = Math.min(analysis.frames.length - 1, Math.floor((performance.now() / 1000) % 8) * 30);
-    const frame = analysis.frames[idx];
-    drawFrame(ctx, { ...frame, time: performance.now() / 1000 });
+  const frame = analysisFrameAtTime(playOffset);
+  if (frame) {
+    drawFrame(ctx, { ...frame, time: playOffset });
   } else {
     drawBackdrop(ctx);
-    drawFrame(ctx, { ...silentFrame(), time: performance.now() / 1000 });
+    drawFrame(ctx, { ...silentFrame(), time: 0 });
   }
 }
 
@@ -675,6 +1206,11 @@ function pausePlayback() {
   isPlaying = false;
   playBtn.textContent = 'Play';
   cancelAnimationFrame(previewRAF);
+  if (automation.isRecording) {
+    automation.stop();
+    syncAutomationControls();
+  }
+  previewAtPlayhead();
 }
 
 function stopPlayback() {
@@ -688,6 +1224,7 @@ function stopPlayback() {
   cancelAnimationFrame(previewRAF);
   resetLiveBeatState();
   if (audioBuffer) {
+    syncPlayheadSlider(0, audioBuffer.duration);
     updateTimeDisplay(0, audioBuffer.duration);
     resetPlayhead();
     refreshPreview();
@@ -699,11 +1236,16 @@ function startPreviewLoop() {
     if (!isPlaying) return;
 
     const elapsed = playOffset + (audioContext.currentTime - playStartTime);
+    applyAutomationAtTime(elapsed);
     const frame = liveFrameFromAnalyser(analyserNode, 128);
     frame.time = elapsed;
     drawFrame(ctx, frame);
-
+    if (automation.isRecording) {
+      captureAutomationKeyframe(elapsed);
+    }
+    syncPlayheadSlider(elapsed, audioBuffer.duration);
     updateTimeDisplay(elapsed, audioBuffer.duration);
+    updateAnalysisDisplays();
     previewRAF = requestAnimationFrame(loop);
   }
 
@@ -712,6 +1254,7 @@ function startPreviewLoop() {
 
 function updateTimeDisplay(current, total) {
   timeDisplay.textContent = `${formatTime(current)} / ${formatTime(total)}`;
+  syncPlayheadSlider(current, total);
 }
 
 function formatTime(seconds) {
@@ -784,6 +1327,11 @@ function resetState(clearAudioLabel = true) {
   audioFile = null;
   audioBuffer = null;
   analysis = null;
+  playOffset = 0;
+  automation.clear();
+  clearAutomationSample();
+  syncAutomationControls();
+  syncPlayheadSlider(0, 0);
   if (clearAudioLabel) fileNameEl.textContent = 'No audio loaded';
   playBtn.disabled = true;
   stopBtn.disabled = true;
@@ -794,3 +1342,5 @@ function resetState(clearAudioLabel = true) {
 
 drawBackdrop(ctx);
 drawFrame(ctx, silentFrame());
+updateAnalysisDisplays();
+syncAutomationControls();

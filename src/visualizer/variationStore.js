@@ -29,6 +29,7 @@ export const COLOR_MODES = [
  * @property {boolean} roundedEdges
  * @property {boolean} kanten
  * @property {number} cornerRound
+ * @property {boolean} fixedLayout
  */
 
 /** @type {VariationSettings} */
@@ -49,6 +50,7 @@ export const DEFAULT_VARIATION = {
   roundedEdges: false,
   kanten: true,
   cornerRound: 45,
+  fixedLayout: true,
 };
 
 function clamp(v, min, max) {
@@ -78,6 +80,7 @@ export function cloneVariation(v) {
     roundedEdges: !!v.roundedEdges,
     kanten: !!v.kanten,
     cornerRound: v.cornerRound,
+    fixedLayout: v.fixedLayout !== false,
   };
 }
 
@@ -115,6 +118,7 @@ export function loadVariation() {
       roundedEdges: !!parsed.roundedEdges,
       kanten: parsed.kanten !== false,
       cornerRound: clamp(Number(parsed.cornerRound) ?? DEFAULT_VARIATION.cornerRound, 0, 100),
+      fixedLayout: parsed.fixedLayout !== false,
     };
   } catch {
     return cloneVariation(DEFAULT_VARIATION);
