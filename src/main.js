@@ -144,6 +144,8 @@ const cinematicSection = document.getElementById('cinematic-section');
 const cinematicSliders = document.getElementById('cinematic-sliders');
 const cinematicShadowsCheck = document.getElementById('cinematic-shadows-check');
 const cinematicShadowsToggle = document.getElementById('cinematic-shadows-toggle');
+const cinematicTrueColorsCheck = document.getElementById('cinematic-true-colors-check');
+const cinematicTrueColorsToggle = document.getElementById('cinematic-true-colors-toggle');
 const cinematicFloorCheck = document.getElementById('cinematic-floor-check');
 const cinematicFloorToggle = document.getElementById('cinematic-floor-toggle');
 const cinematicResetBtn = document.getElementById('cinematic-reset-btn');
@@ -683,6 +685,10 @@ function syncCinematicPanelFromSettings(settings) {
     cinematicShadowsCheck.checked = s.shadows;
     cinematicShadowsToggle?.classList.toggle('active', s.shadows);
   }
+  if (cinematicTrueColorsCheck) {
+    cinematicTrueColorsCheck.checked = s.trueColors;
+    cinematicTrueColorsToggle?.classList.toggle('active', s.trueColors);
+  }
 }
 
 function setupCinematicPanel() {
@@ -727,6 +733,11 @@ function setupCinematicPanel() {
   cinematicShadowsCheck?.addEventListener('change', () => {
     cinematicShadowsToggle?.classList.toggle('active', cinematicShadowsCheck.checked);
     applyCinematic({ shadows: cinematicShadowsCheck.checked });
+  });
+
+  cinematicTrueColorsCheck?.addEventListener('change', () => {
+    cinematicTrueColorsToggle?.classList.toggle('active', cinematicTrueColorsCheck.checked);
+    applyCinematic({ trueColors: cinematicTrueColorsCheck.checked });
   });
 
   cinematicResetBtn?.addEventListener('click', () => {

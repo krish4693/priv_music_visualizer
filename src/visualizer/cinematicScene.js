@@ -188,7 +188,12 @@ export class CinematicScene {
 
   _materialOpts() {
     const s = this.cinematicSettings;
-    return { metalness: s.metalness, roughness: s.roughness, emissive: s.emissive };
+    return {
+      metalness: s.metalness,
+      roughness: s.roughness,
+      emissive: s.emissive,
+      trueColors: !!s.trueColors,
+    };
   }
 
   _applyFog() {
@@ -235,7 +240,7 @@ export class CinematicScene {
 
   _updateMeshMaterials() {
     const opts = this._materialOpts();
-    const snapColors = this.variation.colorMode === 'manual';
+    const snapColors = opts.trueColors && this.variation.colorMode === 'manual';
     for (const s of this.shapes) {
       const mesh = this._meshByShape.get(s);
       if (!mesh?.material) continue;

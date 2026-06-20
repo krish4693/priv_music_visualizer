@@ -21,6 +21,7 @@ export const DEFAULT_CINEMATIC_SETTINGS = {
   floorGloss: 28,
   showFloor: true,
   filmGrain: 32,
+  trueColors: false,
 };
 
 function clamp(v, min, max) {
@@ -34,6 +35,7 @@ export function cloneCinematicSettings(s) {
     ...s,
     shadows: s?.shadows !== false,
     showFloor: s?.showFloor !== false,
+    trueColors: !!s?.trueColors,
   };
 }
 
@@ -73,6 +75,7 @@ export function normalizeCinematicSettings(raw) {
     floorGloss: clamp(Number(raw.floorGloss) ?? d.floorGloss, 0, 100),
     showFloor: raw.showFloor !== false,
     filmGrain: clamp(Number(raw.filmGrain) ?? d.filmGrain, 0, 100),
+    trueColors: !!raw.trueColors,
   };
 }
 
