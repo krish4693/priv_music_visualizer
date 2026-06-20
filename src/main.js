@@ -23,6 +23,11 @@ import { saveAudio, loadAudio, saveImage, loadAllImages, deleteImage } from './s
 import { extractPaletteFromFile, fileToImageSource, blobToFile } from './images/palette.js';
 
 const ACTIVE_IMAGE_KEY = 'visualizer-active-image-id';
+const BUNDLED_AUDIO_URL = '/samples/aboud-vs-flab.wav';
+const BUNDLED_AUDIO_NAME = '02 AboudVsFlab.wav';
+const BUNDLED_IMAGE_URL = '/samples/flab-the-blue-monk.jpg';
+const BUNDLED_IMAGE_NAME = 'flab-the-blue-monk.jpg';
+const BUNDLED_IMAGE_ID = 'bundled-cover';
 
 const fileInput = document.getElementById('file-input');
 const dropzone = document.getElementById('dropzone');
@@ -124,9 +129,44 @@ async function initFromStorage() {
     if (storedAudio) {
       fileNameEl.textContent = `${storedAudio.name} (saved)`;
       await processAudioFile(storedAudio, false);
+    } else {
+      await loadBundledAudio();
+    }
+
+    if (!savedImages.length) {
+      await loadBundledImage();
     }
   } catch (err) {
     console.warn('Could not restore saved files', err);
+  }
+}
+
+async function fetchAsFile(url, name, type) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to load ${url}`);
+  const blob = await res.blob();
+  return new File([blob], name, { type: blob.type || type });
+}
+
+async function loadBundledAudio() {
+  try {
+    const file = await fetchAsFile(BUNDLED_AUDIO_URL, BUNDLED_AUDIO_NAME, 'audio/wav');
+    fileNameEl.textContent = `${file.name} (bundled sample)`;
+    await processAudioFile(file, false);
+  } catch (err) {
+    console.warn('Bundled sample audio not available', err);
+  }
+}
+
+async function loadBundledImage() {
+  try {
+    const file = await fetchAsFile(BUNDLED_IMAGE_URL, BUNDLED_IMAGE_NAME, 'image/jpeg');
+    const palette = await extractPaletteFromFile(file);
+    await addImageRecord(BUNDLED_IMAGE_ID, file, palette, true);
+    setActiveImage(BUNDLED_IMAGE_ID);
+    updateImageCount();
+  } catch (err) {
+    console.warn('Bundled sample image not available', err);
   }
 }
 

@@ -23,6 +23,10 @@ npm run dev
 
 Open the URL shown (usually http://localhost:5173).
 
+On first load (no saved files in browser storage), the app auto-loads bundled dev samples:
+- `public/samples/aboud-vs-flab.wav` — *02 AboudVsFlab*
+- `public/samples/flab-the-blue-monk.jpg` — FLAB cover art
+
 ## Usage
 
 1. Drop or select an MP3 or WAV file
