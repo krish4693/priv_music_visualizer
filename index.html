@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Music Image Visualizer</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <h1>Music Image Visualizer</h1>
+        <p class="subtitle">Upload your image and music — the track warps, shifts, colors and glitches your picture in sync.</p>
+      </header>
+
+      <div class="upload-grid">
+      <section class="upload-section">
+        <p class="upload-label">Audio</p>
+        <label class="dropzone" id="dropzone" for="file-input">
+          <input type="file" id="file-input" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,.mp3,.wav" hidden />
+          <span class="dropzone-icon">♫</span>
+          <span class="dropzone-text">Drop MP3 / WAV or click</span>
+        </label>
+        <p class="file-name" id="file-name">No audio saved</p>
+        <div class="progress-wrap" id="upload-progress-wrap" hidden>
+          <p class="progress-heading">Upload &amp; analysis</p>
+          <div class="progress-bar">
+            <div class="progress-fill upload-fill" id="upload-progress-fill"></div>
+          </div>
+          <p class="progress-label" id="upload-progress-label">Reading file…</p>
+          <p class="progress-percent" id="upload-progress-percent">0%</p>
+        </div>
+      </section>
+
+      <section class="upload-section">
+        <p class="upload-label">Your image</p>
+        <label class="dropzone dropzone-images" id="image-dropzone" for="image-input">
+          <input type="file" id="image-input" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" multiple hidden />
+          <span class="dropzone-icon">🖼</span>
+          <span class="dropzone-text">Drop image(s) or click — click a thumbnail below to choose which one to visualize</span>
+        </label>
+        <p class="file-name" id="image-count">No images saved</p>
+        <div class="image-gallery" id="image-gallery"></div>
+      </section>
+      </div>
+
+      <section class="mapping-section" id="mapping-section">
+        <div class="mapping-header">
+          <span class="mapping-title">Effect mapping</span>
+          <span class="mapping-hint">Route audio to image effects — zoom, motion, color, glitch, wave, shape morph.</span>
+        </div>
+        <div class="mapping-table-wrap">
+          <table class="mapping-table" id="mapping-table">
+            <thead>
+              <tr>
+                <th>Image effect</th>
+                <th>Audio source</th>
+                <th>Sensitivity</th>
+              </tr>
+            </thead>
+            <tbody id="mapping-body"></tbody>
+          </table>
+        </div>
+        <div class="mapping-controls">
+          <label class="viscosity-control">
+            <span class="viscosity-label">Effect smoothing</span>
+            <span class="viscosity-hint">Lower = snappier reactions; higher = slower, fluid blends</span>
+            <div class="viscosity-row">
+              <input type="range" id="viscosity-slider" min="0" max="100" step="1" value="35" aria-label="Effect smoothing" />
+              <span class="viscosity-val" id="viscosity-val">35%</span>
+            </div>
+          </label>
+        </div>
+        <button type="button" class="mapping-reset" id="mapping-reset">Reset to defaults</button>
+      </section>
+
+      <section class="canvas-section">
+        <canvas id="visualizer" width="1280" height="720"></canvas>
+        <div class="transport">
+          <button id="play-btn" disabled>Play</button>
+          <button id="stop-btn" disabled>Stop</button>
+          <span id="time-display">0:00 / 0:00</span>
+        </div>
+      </section>
+
+      <section class="export-section">
+        <button id="export-btn" disabled>Export MP4 (720p)</button>
+        <div class="progress-wrap" id="create-progress-wrap" hidden>
+          <p class="progress-heading">Video creation</p>
+          <div class="progress-bar">
+            <div class="progress-fill create-fill" id="create-progress-fill"></div>
+          </div>
+          <p class="progress-label" id="create-progress-label">Preparing…</p>
+          <p class="progress-percent" id="create-progress-percent">0%</p>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
