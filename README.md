@@ -26,7 +26,7 @@ npm run dev
 
 Open the URL shown (usually http://localhost:5173).
 
-On first load, the app tries the bundled sample `public/samples/aboud-vs-flab.wav`, then falls back to audio saved in browser storage.
+On first load, the app tries the bundled sample `public/samples/the-blue-monk.mp3` (track 09 — The Blue Monk), then falls back to audio saved in browser storage.
 
 ## Usage
 

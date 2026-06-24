@@ -1,9 +1,12 @@
-import { analyzeAudioBuffer, decodeAudioFile, liveFrameFromAnalyser, resetLiveBeatState, FPS } from './audio/analyzer.js';
+import { analyzeAudioBuffer, decodeAudioFile, liveFrameFromAnalyser, resetLiveBeatState, deserializeAnalysis, audioFileFingerprint, serializeAnalysis, FPS } from './audio/analyzer.js';
 import {
   drawFrame,
   drawBackdrop,
   resetRenderer,
   resetPlayhead,
+  resetMotionState,
+  warmScenePreview,
+  setSongDuration,
   getLiveAnalysisState,
   getVariationSettings,
   setAutomationSample,
@@ -22,6 +25,10 @@ import {
   clearAutomationPaletteCache,
   getCinematicSettings,
   setCinematicSettings,
+  setSongTitle,
+  setTitleFrequency,
+  getSongTitle,
+  getTitleFrequency,
 } from './visualizer/renderer.js';
 import {
   AUDIO_SOURCES,
@@ -36,7 +43,7 @@ import {
   formatAnalysisPercent,
 } from './visualizer/mappingMatrix.js';
 import { exportToMp4 } from './export/ffmpegExport.js';
-import { saveAudio, loadAudio } from './storage/db.js';
+import { saveAudio, loadAudio, saveAudioAnalysis } from './storage/db.js';
 import { POP_ART_COLORS } from './visualizer/popArtPalette.js';
 import {
   loadFullPalette,
@@ -57,18 +64,22 @@ import {
   saveVariation,
   cloneVariation,
 } from './visualizer/variationStore.js';
-import { VISUAL_CONCEPTS, isGeometricConcept } from './visualizer/visualConceptStore.js';
+import { VISUAL_CONCEPTS, isGeometricConcept, isLavaConcept, isLivingSongConcept, isGlobeConcept } from './visualizer/visualConceptStore.js';
+import { livingSongVisualTimeAt, LIVING_SONG_HOLD_SECONDS } from './visualizer/concepts/visualLivingSongConcept.js';
+import { GLOBE_SHAPE_MODES } from './visualizer/globeShapeModes.js';
+import { GLOBE_TUBE_PROFILES } from './visualizer/globeTubeProfile.js';
 import { AutomationRecorder } from './visualizer/automationStore.js';
 import { buildAppConfig, downloadAppConfig, parseAppConfig, suggestConfigFilename } from './visualizer/configStore.js';
 import { loadBackgroundColor, saveBackgroundColor } from './visualizer/backgroundStore.js';
+import { setupHelpPanel } from './help/setupHelpPanel.js';
 import {
   CINEMATIC_SLIDERS,
   DEFAULT_CINEMATIC_SETTINGS,
   normalizeCinematicSettings,
 } from './visualizer/cinematicSettingsStore.js';
 
-const BUNDLED_AUDIO_URL = '/samples/aboud-vs-flab.wav';
-const BUNDLED_AUDIO_NAME = '02 AboudVsFlab.wav';
+const BUNDLED_AUDIO_URL = '/samples/the-blue-monk.mp3';
+const BUNDLED_AUDIO_NAME = '09 TheBlueMonk.mp3';
 
 const fileInput = document.getElementById('file-input');
 const dropzone = document.getElementById('dropzone');
@@ -76,6 +87,7 @@ const fileNameEl = document.getElementById('file-name');
 const canvas = document.getElementById('visualizer');
 const playBtn = document.getElementById('play-btn');
 const stopBtn = document.getElementById('stop-btn');
+const muteBtn = document.getElementById('mute-btn');
 const playheadSlider = document.getElementById('playhead-slider');
 const recordBtn = document.getElementById('record-btn');
 const clearAutomationBtn = document.getElementById('clear-automation-btn');
@@ -91,6 +103,7 @@ const timeDisplay = document.getElementById('time-display');
 const speedControl = document.getElementById('speed-control');
 const speedControlPanel = document.getElementById('speed-control-panel');
 const exportBtn = document.getElementById('export-btn');
+const exportAudioCheck = document.getElementById('export-audio-check');
 const uploadProgressWrap = document.getElementById('upload-progress-wrap');
 const uploadProgressFill = document.getElementById('upload-progress-fill');
 const uploadProgressLabel = document.getElementById('upload-progress-label');
@@ -112,14 +125,24 @@ const addColorBtn = document.getElementById('add-color-btn');
 const bgColorPicker = document.getElementById('bg-color-picker');
 const shapeToggles = document.getElementById('shape-toggles');
 const visualConceptSelect = document.getElementById('visual-concept-select');
+const shapeTypesBlock = document.getElementById('shape-types-block');
 const shapeTypesLabel = document.getElementById('shape-types-label');
 const colorModeSelect = document.getElementById('color-mode-select');
 const colorShiftSlider = document.getElementById('color-shift-slider');
 const colorShiftVal = document.getElementById('color-shift-val');
 const shapeCountSlider = document.getElementById('shape-count-slider');
+const shapeCountInput = document.getElementById('shape-count-input');
 const shapeCountVal = document.getElementById('shape-count-val');
 const sizeSpreadSlider = document.getElementById('size-spread-slider');
 const sizeSpreadVal = document.getElementById('size-spread-val');
+const elementSizeFromSlider = document.getElementById('element-size-from-slider');
+const elementSizeFromVal = document.getElementById('element-size-from-val');
+const elementSizeToSlider = document.getElementById('element-size-to-slider');
+const elementSizeToVal = document.getElementById('element-size-to-val');
+const elementDistanceFromSlider = document.getElementById('element-distance-from-slider');
+const elementDistanceFromVal = document.getElementById('element-distance-from-val');
+const elementDistanceToSlider = document.getElementById('element-distance-to-slider');
+const elementDistanceToVal = document.getElementById('element-distance-to-val');
 const spinIntensitySlider = document.getElementById('spin-intensity-slider');
 const spinIntensityVal = document.getElementById('spin-intensity-val');
 const speedSpreadSlider = document.getElementById('speed-spread-slider');
@@ -127,6 +150,7 @@ const speedSpreadVal = document.getElementById('speed-spread-val');
 const layoutSpreadSlider = document.getElementById('layout-spread-slider');
 const layoutSpreadVal = document.getElementById('layout-spread-val');
 const fixedLayoutCheck = document.getElementById('fixed-layout-check');
+const elementUnicolorCheck = document.getElementById('element-unicolor-check');
 const depthRangeSlider = document.getElementById('depth-range-slider');
 const depthRangeVal = document.getElementById('depth-range-val');
 const manualSpeedCheck = document.getElementById('manual-speed-check');
@@ -141,9 +165,46 @@ const kantenCheck = document.getElementById('kanten-check');
 const kantenToggle = document.getElementById('kanten-toggle');
 const cornerRoundSlider = document.getElementById('corner-round-slider');
 const cornerRoundVal = document.getElementById('corner-round-val');
+const liquidControlsGroup = document.getElementById('liquid-controls-group');
+const lavaControlsLabel = document.getElementById('lava-controls-label');
+const lavaControlsHint = document.getElementById('lava-controls-hint');
+const liquidFlowSpeedSlider = document.getElementById('liquid-flow-speed-slider');
+const liquidFlowSpeedVal = document.getElementById('liquid-flow-speed-val');
+const liquidThicknessSlider = document.getElementById('liquid-thickness-slider');
+const liquidThicknessVal = document.getElementById('liquid-thickness-val');
+const liquidReliefSlider = document.getElementById('liquid-relief-slider');
+const liquidReliefVal = document.getElementById('liquid-relief-val');
+const liquidTurbulenceSlider = document.getElementById('liquid-turbulence-slider');
+const liquidTurbulenceVal = document.getElementById('liquid-turbulence-val');
+const globeControlsGroup = document.getElementById('globe-controls-group');
+const globeShapeSelect = document.getElementById('globe-shape-select');
+const globeDetailSlider = document.getElementById('globe-detail-slider');
+const globeDetailVal = document.getElementById('globe-detail-val');
+const globeTubeProfileSelect = document.getElementById('globe-tube-profile-select');
+const livingSongControlsGroup = document.getElementById('living-song-controls-group');
+const elementMotionSlider = document.getElementById('element-motion-slider');
+const elementMotionVal = document.getElementById('element-motion-val');
+const elementTurnSlider = document.getElementById('element-turn-slider');
+const elementTurnVal = document.getElementById('element-turn-val');
+const element3dMotionSlider = document.getElementById('element-3d-motion-slider');
+const element3dMotionVal = document.getElementById('element-3d-motion-val');
+const surfaceWobbleSlider = document.getElementById('surface-wobble-slider');
+const surfaceWobbleVal = document.getElementById('surface-wobble-val');
+const backgroundDepthSlider = document.getElementById('background-depth-slider');
+const backgroundDepthVal = document.getElementById('background-depth-val');
 const variationResetBtn = document.getElementById('variation-reset');
 const rendererModeSelect = document.getElementById('renderer-mode-select');
+const cameraZoomSlider = document.getElementById('camera-zoom-slider');
+const cameraZoomVal = document.getElementById('camera-zoom-val');
 const cinematicSection = document.getElementById('cinematic-section');
+const cinematicSectionToggle = document.getElementById('cinematic-section-toggle');
+const cinematicSectionBody = document.getElementById('cinematic-section-body');
+const mappingSection = document.getElementById('mapping-section');
+const mappingSectionToggle = document.getElementById('mapping-section-toggle');
+const mappingSectionBody = document.getElementById('mapping-section-body');
+const audioSourcesSection = document.getElementById('audio-sources-section');
+const audioSourcesSectionToggle = document.getElementById('audio-sources-section-toggle');
+const audioSourcesSectionBody = document.getElementById('audio-sources-section-body');
 const cinematicSliders = document.getElementById('cinematic-sliders');
 const cinematicShadowsCheck = document.getElementById('cinematic-shadows-check');
 const cinematicShadowsToggle = document.getElementById('cinematic-shadows-toggle');
@@ -166,13 +227,18 @@ let sourceNode = null;
 let analyserNode = null;
 let gainNode = null;
 let previewRAF = null;
+let lastAnalysisUiUpdate = 0;
 let isPlaying = false;
+let isMuted = false;
 let playStartTime = 0;
 let playOffset = 0;
 
 const automation = new AutomationRecorder();
 let mappingPanel = null;
 let variationController = null;
+let exportInProgress = false;
+/** @type {string|null} Source URL when audio was loaded from fetch (bundled or config). */
+let audioSourceUrl = null;
 
 const ACCEPTED_EXTENSIONS = /\.(mp3|wav)$/i;
 const ACCEPTED_MIME_TYPES = new Set([
@@ -182,6 +248,10 @@ const ACCEPTED_MIME_TYPES = new Set([
   'audio/wave',
   'audio/x-wav',
 ]);
+
+const CINEMATIC_PANEL_OPEN_KEY = 'visualizer-cinematic-panel-open';
+const MAPPING_PANEL_OPEN_KEY = 'visualizer-mapping-panel-open';
+const SONG_ANALYSIS_PANEL_OPEN_KEY = 'visualizer-song-analysis-panel-open';
 
 function isAcceptedAudioFile(file) {
   if (!file) return false;
@@ -197,15 +267,24 @@ setupDropzone();
 fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
 playBtn.addEventListener('click', togglePlay);
 stopBtn.addEventListener('click', stopPlayback);
+muteBtn?.addEventListener('click', toggleMute);
 setupPlayheadControl();
 setupAutomationControls();
 setupConfigControls();
 setupCinematicPanel();
 setupRendererMode();
+setupCameraZoom();
 exportBtn.addEventListener('click', () => handleExport(false));
 previewExportBtn?.addEventListener('click', () => handleExport(true));
 
 mappingPanel = setupMappingPanel();
+setupCollapsiblePanels();
+setupHelpPanel({
+  getVariation: getVariationSettings,
+  getCinematic: getCinematicSettings,
+  getViscosity: () => mappingPanel?.getViscosity?.() ?? loadViscosity(),
+  hasAudio: () => !!audioBuffer,
+});
 setupPaletteControls();
 setupBackgroundControl();
 variationController = setupVariationPanel();
@@ -218,6 +297,7 @@ setVariationSettings(loadVariation());
 viscositySlider.value = String(Math.round(loadViscosity() * 100));
 viscosityVal.textContent = `${viscositySlider.value}%`;
 variationController?.syncFromStores?.();
+void tryLoadPresetFromQuery();
 initFromStorage();
 
 async function initFromStorage() {
@@ -228,7 +308,11 @@ async function initFromStorage() {
 
   try {
     const storedAudio = await loadAudio();
-    if (storedAudio && await processAudioFile(storedAudio, false, `${storedAudio.name} (saved)`, { quiet: true })) {
+    if (storedAudio?.file && await processAudioFile(storedAudio.file, false, `${storedAudio.file.name} (saved)`, {
+      quiet: true,
+      cachedAnalysis: storedAudio.analysis,
+      cachedFingerprint: storedAudio.fingerprint,
+    })) {
       return;
     }
   } catch (err) {
@@ -241,8 +325,11 @@ async function initFromStorage() {
 
 async function tryLoadBundledAudio() {
   try {
-    const file = await fetchAsFile(BUNDLED_AUDIO_URL, BUNDLED_AUDIO_NAME, 'audio/wav');
-    return await processAudioFile(file, true, `${file.name} (bundled sample)`, { quiet: true });
+    const file = await fetchAsFile(BUNDLED_AUDIO_URL, BUNDLED_AUDIO_NAME, 'audio/mpeg');
+    return await processAudioFile(file, true, `${file.name} (bundled sample)`, {
+      quiet: true,
+      sourceUrl: BUNDLED_AUDIO_URL,
+    });
   } catch (err) {
     console.warn('Bundled sample not available', err);
     return false;
@@ -278,9 +365,10 @@ async function fetchAsFile(url, name, type) {
   return new File([blob], name, { type: blob.type || type });
 }
 
-async function processAudioFile(file, persist, displayName, { quiet = false } = {}) {
+async function processAudioFile(file, persist, displayName, { quiet = false, cachedAnalysis = null, cachedFingerprint = null, sourceUrl = null } = {}) {
   stopPlayback();
   resetState(false);
+  audioSourceUrl = sourceUrl;
   setUploadProgress(0, 'Starting…');
   showUploadProgress(true);
   dropzone.classList.add('loading');
@@ -290,25 +378,58 @@ async function processAudioFile(file, persist, displayName, { quiet = false } = 
     fileNameEl.textContent = displayName ?? (persist ? file.name : `${file.name} (saved)`);
 
     const onUploadProgress = (pct, label) => setUploadProgress(pct, label);
-
-    if (persist) await saveAudio(file);
+    const fingerprint = cachedFingerprint ?? audioFileFingerprint(file);
 
     audioBuffer = await decodeAudioFile(file, onUploadProgress);
-    analysis = await analyzeAudioBuffer(audioBuffer, onUploadProgress);
+
+    let restored = cachedAnalysis && fingerprint === audioFileFingerprint(file)
+      ? deserializeAnalysis(cachedAnalysis)
+      : null;
+
+    if (!restored) {
+      try {
+        const stored = await loadAudio();
+        if (stored?.fingerprint === fingerprint && stored.analysis) {
+          restored = deserializeAnalysis(stored.analysis);
+        }
+      } catch {
+        /* no stored cache */
+      }
+    }
+
+    if (restored) {
+      analysis = restored;
+      onUploadProgress(100, 'Using cached analysis');
+    } else {
+      analysis = await analyzeAudioBuffer(audioBuffer, onUploadProgress);
+      if (persist) {
+        await saveAudio(file, analysis);
+      } else {
+        await saveAudioAnalysis(analysis);
+      }
+    }
 
     resetRenderer(canvas.width, canvas.height);
+    setSongDuration(audioBuffer.duration);
     resetLiveBeatState();
     drawBackdrop(ctx);
 
     playBtn.disabled = false;
     stopBtn.disabled = false;
+    if (muteBtn) muteBtn.disabled = false;
     exportBtn.disabled = false;
     syncClipRangeInputs();
-    updateTimeDisplay(0, audioBuffer.duration);
-    syncPlayheadSlider(0, audioBuffer.duration);
+    updateTimeDisplay(0, clipDisplayDuration());
+    syncPlayheadSlider(0, clipDisplayDuration());
     previewAtPlayhead();
     syncAutomationControls();
     setUploadProgress(100, 'Ready to play');
+
+    if (!getSongTitle()) {
+      const fromName = titleFromFilename(file.name);
+      if (fromName) applyTitleSettings(fromName, loadTitleFrequency());
+    }
+
     return true;
   } catch (err) {
     console.error(err);
@@ -323,7 +444,10 @@ async function processAudioFile(file, persist, displayName, { quiet = false } = 
   }
 }
 
-function updateAnalysisDisplays() {
+function updateAnalysisDisplays(force = false) {
+  const now = performance.now();
+  if (!force && now - lastAnalysisUiUpdate < 120) return;
+  lastAnalysisUiUpdate = now;
   mappingPanel?.updateLiveValues?.();
 }
 
@@ -346,14 +470,59 @@ function clearAutomationPaletteCacheLocal() {
 }
 
 function collectCurrentLook() {
+  const title = getSongTitle() || loadSongTitle();
+  const titleFrequency = getTitleFrequency() ?? loadTitleFrequency();
   return {
     variation: getVariationSettings(),
     mappings: mappingPanel?.getMappings() ?? loadMappingMatrix(),
     viscosity: mappingPanel?.getViscosity() ?? loadViscosity(),
     bgColor: loadBackgroundColor(),
+    title,
+    titleFrequency,
     palette: snapshotPaletteForAutomation(),
     cinematic: getCinematicSettings(),
   };
+}
+
+function collectCurrentExportSettings() {
+  return {
+    clipFrom: parseClipSeconds(clipFromInput?.value, 0),
+    clipTo: clipToInput?.value === '' ? null : parseClipSeconds(clipToInput?.value, 0),
+    includeAudio: exportAudioCheck?.checked !== false,
+  };
+}
+
+function collectCurrentAudioRef() {
+  if (!audioFile) return null;
+  return {
+    fileName: audioFile.name,
+    displayName: fileNameEl?.textContent || audioFile.name,
+    fingerprint: audioFileFingerprint(audioFile),
+    url: audioSourceUrl,
+    duration: audioBuffer?.duration ?? null,
+    analysis: analysis ? serializeAnalysis(analysis) : null,
+  };
+}
+
+function applyExportSettings(exportSettings) {
+  if (!exportSettings) return;
+  if (clipFromInput) clipFromInput.value = String(exportSettings.clipFrom ?? 0);
+  if (clipToInput && exportSettings.clipTo != null) {
+    clipToInput.value = String(exportSettings.clipTo);
+  }
+  if (exportAudioCheck) exportAudioCheck.checked = exportSettings.includeAudio !== false;
+  syncClipRangeInputs();
+}
+
+function applyTitleSettings(title, titleFrequency) {
+  const resolvedTitle = typeof title === 'string' ? title : '';
+  const resolvedFreq = Number.isFinite(titleFrequency)
+    ? Math.min(100, Math.max(0, Math.round(titleFrequency)))
+    : loadTitleFrequency();
+  saveSongTitle(resolvedTitle);
+  saveTitleFrequency(resolvedFreq);
+  setSongTitle(resolvedTitle);
+  setTitleFrequency(resolvedFreq);
 }
 
 function applyLookSettings(look) {
@@ -383,9 +552,55 @@ function applyLookSettings(look) {
     setCinematicSettings(look.cinematic);
     syncCinematicPanelFromSettings(look.cinematic);
   }
+  syncCameraZoomUI(look.cinematic ?? getCinematicSettings());
+
+  applyTitleSettings(look.title, look.titleFrequency);
 
   resetPlayhead();
   refreshPreview();
+}
+
+async function restoreAudioFromConfig(audioRef) {
+  if (!audioRef) return false;
+
+  if (audioRef.url) {
+    try {
+      const file = await fetchAsFile(
+        audioRef.url,
+        audioRef.fileName || 'audio.wav',
+        'audio/wav',
+      );
+      audioSourceUrl = audioRef.url;
+      const ok = await processAudioFile(file, false, audioRef.displayName || file.name, {
+        quiet: true,
+        cachedAnalysis: audioRef.analysis,
+        cachedFingerprint: audioRef.fingerprint,
+        sourceUrl: audioRef.url,
+      });
+      if (ok) return true;
+    } catch (err) {
+      console.warn('Could not load audio from config URL', err);
+    }
+  }
+
+  try {
+    const stored = await loadAudio();
+    if (stored?.file && (!audioRef.fingerprint || stored.fingerprint === audioRef.fingerprint)) {
+      const ok = await processAudioFile(stored.file, false, stored.file.name, {
+        quiet: true,
+        cachedAnalysis: audioRef.analysis ?? stored.analysis,
+        cachedFingerprint: audioRef.fingerprint ?? stored.fingerprint,
+      });
+      if (ok) return true;
+    }
+  } catch (err) {
+    console.warn('Could not restore audio from storage', err);
+  }
+
+  if (audioRef.fileName) {
+    flashConfigStatus(`Visual settings loaded — open audio: ${audioRef.fileName}`);
+  }
+  return false;
 }
 
 function flashConfigStatus(message) {
@@ -397,6 +612,41 @@ function flashConfigStatus(message) {
     configStatus.hidden = true;
   }, 2800);
 }
+
+async function tryLoadPresetFromQuery() {
+  const params = new URLSearchParams(location.search);
+  const name = params.get('preset');
+  if (!name) return;
+
+  try {
+    const res = await fetch(`/presets/${encodeURIComponent(name)}.mviz.json`);
+    if (!res.ok) return;
+    const parsed = parseAppConfig(await res.text());
+    if (!parsed) return;
+
+    if (parsed.look) applyLookSettings(parsed.look);
+    if (parsed.export) applyExportSettings(parsed.export);
+
+    if (parsed.renderer && parsed.renderer !== getRendererMode()) {
+      setRendererMode(parsed.renderer);
+      if (rendererModeSelect) rendererModeSelect.value = parsed.renderer;
+      resetRenderer(canvas.width, canvas.height);
+      updateExportButtonLabel();
+    }
+
+    if (parsed.automation?.keyframes?.length) {
+      automation.loadKeyframes(parsed.automation.keyframes);
+      clearAutomationPaletteCacheLocal();
+    }
+
+    flashConfigStatus(`Loaded preset: ${name}`);
+  } catch (err) {
+    console.warn('Could not load preset', err);
+  }
+}
+
+/** Default preview clip end for quick export tests (seconds). */
+const DEFAULT_CLIP_END_SEC = 10.8;
 
 function syncClipRangeInputs() {
   if (!audioBuffer) {
@@ -411,16 +661,24 @@ function syncClipRangeInputs() {
   previewExportBtn.disabled = false;
   clipFromInput.max = String(dur);
   clipToInput.max = String(dur);
-  if (Number(clipToInput.value) <= 0 || Number(clipToInput.value) > dur) {
-    clipToInput.value = String(Math.round(dur * 10) / 10);
+  const clipTo = parseClipSeconds(clipToInput?.value, 0);
+  if (clipTo <= 0 || clipTo > dur) {
+    clipToInput.value = String(Math.min(DEFAULT_CLIP_END_SEC, Math.round(dur * 10) / 10));
   }
+}
+
+function parseClipSeconds(value, fallback = 0) {
+  if (value == null || value === '') return fallback;
+  const normalized = String(value).trim().replace(',', '.');
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function getClipRange() {
   if (!audioBuffer) return { startTime: 0, endTime: 0 };
   const dur = audioBuffer.duration;
-  let startTime = Math.max(0, Number(clipFromInput?.value) || 0);
-  let endTime = Number(clipToInput?.value) || dur;
+  let startTime = Math.max(0, parseClipSeconds(clipFromInput?.value, 0));
+  let endTime = parseClipSeconds(clipToInput?.value, dur);
   if (endTime <= 0) endTime = dur;
   startTime = Math.min(startTime, dur - 0.1);
   endTime = Math.max(startTime + 0.1, Math.min(endTime, dur));
@@ -432,10 +690,11 @@ function setupConfigControls() {
     const config = buildAppConfig({
       rendererMode: getRendererMode(),
       look: collectCurrentLook(),
+      export: collectCurrentExportSettings(),
+      audio: collectCurrentAudioRef(),
       automationKeyframes: automation.exportData(),
-      songName: audioFile?.name,
     });
-    const filename = suggestConfigFilename(audioFile?.name);
+    const filename = suggestConfigFilename(audioFile?.name || getSongTitle());
     downloadAppConfig(config, filename);
     flashConfigStatus(`Saved ${filename}`);
   });
@@ -464,6 +723,10 @@ function setupConfigControls() {
       applyLookSettings(parsed.look);
     }
 
+    if (parsed.export) {
+      applyExportSettings(parsed.export);
+    }
+
     if (parsed.renderer && parsed.renderer !== getRendererMode()) {
       setRendererMode(parsed.renderer);
       if (rendererModeSelect) rendererModeSelect.value = parsed.renderer;
@@ -481,6 +744,9 @@ function setupConfigControls() {
     }
 
     syncAutomationControls();
+    if (parsed.audio) {
+      await restoreAudioFromConfig(parsed.audio);
+    }
     refreshPreview();
     flashConfigStatus(`Loaded ${file.name}`);
   });
@@ -608,37 +874,72 @@ function syncPlayheadSlider(current, total) {
   playheadSlider.value = String(Math.min(total, Math.max(0, current)));
 }
 
+function clipDisplayDuration() {
+  const songDur = audioBuffer?.duration ?? 0;
+  if (songDur > 0 && isLivingSongConcept(getVariationSettings().visualConcept)) {
+    return songDur + LIVING_SONG_HOLD_SECONDS;
+  }
+  return songDur;
+}
+
+function livingSongVisualTime(playTime) {
+  const songDur = audioBuffer?.duration ?? 0;
+  if (!isLivingSongConcept(getVariationSettings().visualConcept) || songDur <= 0) {
+    return playTime;
+  }
+  return livingSongVisualTimeAt(playTime, songDur);
+}
+
 function analysisFrameAtTime(seconds) {
   if (!analysis?.frames?.length) return null;
   const idx = Math.min(analysis.frames.length - 1, Math.floor(seconds * FPS));
   return analysis.frames[idx];
 }
 
-function previewAtPlayhead() {
-  applyAutomationAtTime(playOffset, true);
+let playheadPreviewRaf = 0;
+let playheadScrubPending = false;
+
+function previewAtPlayhead({ warmSteps = 6, syncAutomationUi = true } = {}) {
+  applyAutomationAtTime(Math.min(playOffset, audioBuffer?.duration ?? playOffset), syncAutomationUi);
   drawBackdrop(ctx);
-  const frame = analysisFrameAtTime(playOffset);
-  if (frame) {
-    resetPlayhead();
-    const payload = { ...frame, time: playOffset };
-    for (let i = 0; i < 8; i++) drawFrame(ctx, payload);
-  } else {
-    drawFrame(ctx, { ...silentFrame(), time: 0 });
-  }
-  updateAnalysisDisplays();
+  const songDur = audioBuffer?.duration ?? 0;
+  const audioTime = songDur > 0 ? Math.min(playOffset, Math.max(0, songDur - 1 / FPS)) : playOffset;
+  const visualTime = livingSongVisualTime(playOffset);
+  const frame = analysisFrameAtTime(audioTime);
+  const payload = frame
+    ? { ...frame, time: visualTime }
+    : { ...silentFrame(), time: visualTime };
+  resetMotionState();
+  warmScenePreview(payload, warmSteps);
+  drawFrame(ctx, payload);
+  updateAnalysisDisplays(true);
 }
 
-function seekToTime(seconds) {
+function seekToTime(seconds, { scrubbing = false } = {}) {
   if (!audioBuffer) return;
-  playOffset = Math.min(audioBuffer.duration, Math.max(0, seconds));
-  syncPlayheadSlider(playOffset, audioBuffer.duration);
-  updateTimeDisplay(playOffset, audioBuffer.duration);
+  playOffset = Math.min(clipDisplayDuration(), Math.max(0, seconds));
+  syncPlayheadSlider(playOffset, clipDisplayDuration());
+  updateTimeDisplay(playOffset, clipDisplayDuration());
 
   if (isPlaying) {
     restartPlaybackAtOffset();
-  } else {
-    previewAtPlayhead();
+    return;
   }
+
+  if (scrubbing) {
+    playheadScrubPending = true;
+    if (playheadPreviewRaf) return;
+    playheadPreviewRaf = requestAnimationFrame(() => {
+      playheadPreviewRaf = 0;
+      if (!playheadScrubPending) return;
+      playheadScrubPending = false;
+      previewAtPlayhead({ warmSteps: 0, syncAutomationUi: false });
+    });
+    return;
+  }
+
+  playheadScrubPending = false;
+  previewAtPlayhead({ warmSteps: 6, syncAutomationUi: true });
 }
 
 function restartPlaybackAtOffset() {
@@ -657,13 +958,118 @@ function restartPlaybackAtOffset() {
 
 function setupPlayheadControl() {
   playheadSlider?.addEventListener('input', () => {
-    seekToTime(Number(playheadSlider.value));
+    seekToTime(Number(playheadSlider.value), { scrubbing: true });
+  });
+  playheadSlider?.addEventListener('change', () => {
+    seekToTime(Number(playheadSlider.value), { scrubbing: false });
   });
 }
 
 function syncCinematicPanelVisibility() {
   const cinematic = getRendererMode() === 'cinematic';
-  if (cinematicSection) cinematicSection.hidden = !cinematic;
+  const livingSong = isLivingSongConcept(getVariationSettings().visualConcept);
+  if (cinematicSection) cinematicSection.hidden = !(cinematic || livingSong);
+  syncCinematicPanelCollapseUi();
+}
+
+function isCollapsiblePanelCollapsed(section) {
+  return section?.classList.contains('is-collapsed') ?? true;
+}
+
+function setCollapsiblePanelCollapsed(section, toggle, body, collapsed, storageKey, { persist = true, onChange } = {}) {
+  if (!section || !toggle || !body) return;
+  section.classList.toggle('is-collapsed', collapsed);
+  body.hidden = collapsed;
+  toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  onChange?.();
+  if (persist && storageKey) {
+    try {
+      localStorage.setItem(storageKey, collapsed ? '0' : '1');
+    } catch (_) { /* ignore */ }
+  }
+}
+
+function loadCollapsiblePanelCollapsed(storageKey, defaultCollapsed = true) {
+  try {
+    if (localStorage.getItem(storageKey) === '1') return false;
+  } catch (_) { /* ignore */ }
+  return defaultCollapsed;
+}
+
+function setupCollapsiblePanel(section, toggle, body, storageKey, { defaultCollapsed = true, onChange } = {}) {
+  if (!section || !toggle || !body) return;
+  toggle.addEventListener('click', () => {
+    setCollapsiblePanelCollapsed(
+      section,
+      toggle,
+      body,
+      !isCollapsiblePanelCollapsed(section),
+      storageKey,
+      { onChange },
+    );
+  });
+  setCollapsiblePanelCollapsed(
+    section,
+    toggle,
+    body,
+    loadCollapsiblePanelCollapsed(storageKey, defaultCollapsed),
+    storageKey,
+    { persist: false, onChange },
+  );
+}
+
+function setupCollapsiblePanels() {
+  setupCollapsiblePanel(
+    cinematicSection,
+    cinematicSectionToggle,
+    cinematicSectionBody,
+    CINEMATIC_PANEL_OPEN_KEY,
+    { defaultCollapsed: true, onChange: syncStudioLayout },
+  );
+  setupCollapsiblePanel(
+    mappingSection,
+    mappingSectionToggle,
+    mappingSectionBody,
+    MAPPING_PANEL_OPEN_KEY,
+    { defaultCollapsed: true, onChange: syncStudioLayout },
+  );
+  setupCollapsiblePanel(
+    audioSourcesSection,
+    audioSourcesSectionToggle,
+    audioSourcesSectionBody,
+    SONG_ANALYSIS_PANEL_OPEN_KEY,
+    { defaultCollapsed: true, onChange: syncStudioLayout },
+  );
+  syncStudioLayout();
+}
+
+function isCinematicPanelCollapsed() {
+  return isCollapsiblePanelCollapsed(cinematicSection);
+}
+
+function setCinematicPanelCollapsed(collapsed, { persist = true } = {}) {
+  setCollapsiblePanelCollapsed(
+    cinematicSection,
+    cinematicSectionToggle,
+    cinematicSectionBody,
+    collapsed,
+    CINEMATIC_PANEL_OPEN_KEY,
+    { persist, onChange: syncCinematicPanelCollapseUi },
+  );
+}
+
+function loadCinematicPanelCollapsed() {
+  return loadCollapsiblePanelCollapsed(CINEMATIC_PANEL_OPEN_KEY, true);
+}
+
+function syncStudioLayout() {
+  const visible = [cinematicSection, mappingSection, audioSourcesSection].filter((s) => s && !s.hidden);
+  const anyExpanded = visible.some((s) => !isCollapsiblePanelCollapsed(s));
+  document.body.classList.toggle('panel-right-expanded', anyExpanded);
+}
+
+function syncCinematicPanelCollapseUi() {
+  syncStudioLayout();
 }
 
 function syncCinematicPanelFromSettings(settings) {
@@ -747,6 +1153,7 @@ function setupCinematicPanel() {
     cinematicSettings = { ...DEFAULT_CINEMATIC_SETTINGS };
     setCinematicSettings(cinematicSettings);
     syncCinematicPanelFromSettings(cinematicSettings);
+    syncCameraZoomUI(cinematicSettings);
     refreshPreview();
   });
 
@@ -760,6 +1167,33 @@ function updateExportButtonLabel() {
   exportBtn.textContent = mode === 'cinematic'
     ? 'Export MP4 (1080p · Cinematic)'
     : 'Export MP4 (1080p · Pop Art)';
+}
+
+function cameraZoomLabel(value) {
+  const v = Math.round(Number(value) || 50);
+  if (v <= 12) return `${v} · far`;
+  if (v <= 32) return `${v} · wide`;
+  if (v >= 88) return `${v} · inside`;
+  if (v >= 68) return `${v} · tight`;
+  return String(v);
+}
+
+function syncCameraZoomUI(settings = getCinematicSettings()) {
+  const z = settings?.cameraZoom ?? 50;
+  if (cameraZoomSlider) cameraZoomSlider.value = String(z);
+  if (cameraZoomVal) cameraZoomVal.textContent = cameraZoomLabel(z);
+}
+
+function setupCameraZoom() {
+  if (!cameraZoomSlider) return;
+  syncCameraZoomUI();
+
+  cameraZoomSlider.addEventListener('input', () => {
+    const next = Number(cameraZoomSlider.value);
+    setCinematicSettings({ ...getCinematicSettings(), cameraZoom: next });
+    if (cameraZoomVal) cameraZoomVal.textContent = cameraZoomLabel(next);
+    refreshPreview();
+  });
 }
 
 function setupRendererMode() {
@@ -982,6 +1416,7 @@ function togglePaletteColor(index) {
   saveSelectedIndices(fullPalette, selectedPaletteIndices);
   applyActivePalette();
   renderPaletteSwatches();
+  variationController?.refreshLivingControls?.();
   notifyAutomationEdit();
   refreshPreview();
 }
@@ -1006,6 +1441,7 @@ function setupPaletteControls() {
     saveSelectedIndices(fullPalette, selectedPaletteIndices);
     applyActivePalette();
     renderPaletteSwatches();
+    variationController?.refreshLivingControls?.();
     notifyAutomationEdit();
     refreshPreview();
   });
@@ -1030,10 +1466,26 @@ function setupVariationPanel() {
   let variation = loadVariation();
   let regenerateOnNextApply = false;
 
+  function renderLivingSongControls() {
+    const concept = variation.visualConcept ?? 'geometric';
+    livingSongControlsGroup?.toggleAttribute('hidden', !isLivingSongConcept(concept));
+    if (surfaceWobbleSlider) surfaceWobbleSlider.value = String(variation.surfaceWobble ?? 0);
+    if (backgroundDepthSlider) backgroundDepthSlider.value = String(variation.backgroundDepth ?? 50);
+  }
+
   function syncSliderLabels() {
     colorShiftVal.textContent = `${variation.colorShift}%`;
     shapeCountVal.textContent = String(variation.shapeCount);
+    if (shapeCountInput) shapeCountInput.value = String(variation.shapeCount);
     sizeSpreadVal.textContent = `${variation.sizeSpread}%`;
+    if (elementSizeFromVal) elementSizeFromVal.textContent = `${variation.elementSizeFrom ?? 45}%`;
+    if (elementSizeToVal) elementSizeToVal.textContent = `${variation.elementSizeTo ?? 100}%`;
+    if (elementSizeFromSlider) elementSizeFromSlider.value = String(variation.elementSizeFrom ?? 45);
+    if (elementSizeToSlider) elementSizeToSlider.value = String(variation.elementSizeTo ?? 100);
+    if (elementDistanceFromVal) elementDistanceFromVal.textContent = `${variation.elementDistanceFrom ?? 42}%`;
+    if (elementDistanceToVal) elementDistanceToVal.textContent = `${variation.elementDistanceTo ?? 74}%`;
+    if (elementDistanceFromSlider) elementDistanceFromSlider.value = String(variation.elementDistanceFrom ?? 42);
+    if (elementDistanceToSlider) elementDistanceToSlider.value = String(variation.elementDistanceTo ?? 74);
     spinIntensityVal.textContent = `${variation.spinIntensity}%`;
     speedSpreadVal.textContent = `${variation.speedSpread}%`;
     layoutSpreadVal.textContent = `${variation.layoutSpread}%`;
@@ -1045,6 +1497,54 @@ function setupVariationPanel() {
     manualSpeedSlider.disabled = !variation.manualSpeed;
     surpriseRateSlider.disabled = !variation.surprises;
     cornerRoundSlider.disabled = !variation.roundedEdges;
+    liquidFlowSpeedVal.textContent = `${variation.liquidFlowSpeed}%`;
+    liquidThicknessVal.textContent = `${variation.liquidThickness}%`;
+    liquidReliefVal.textContent = `${variation.liquidRelief}%`;
+    liquidTurbulenceVal.textContent = `${variation.liquidTurbulence}%`;
+    if (elementMotionVal) elementMotionVal.textContent = `${variation.elementMotion ?? 50}%`;
+    if (elementTurnVal) elementTurnVal.textContent = `${variation.elementTurn ?? 50}%`;
+    if (element3dMotionVal) element3dMotionVal.textContent = `${variation.element3dMotion ?? 50}%`;
+    if (surfaceWobbleVal) surfaceWobbleVal.textContent = `${variation.surfaceWobble ?? 0}%`;
+    if (backgroundDepthVal) backgroundDepthVal.textContent = `${variation.backgroundDepth ?? 50}%`;
+    renderLivingSongControls();
+  }
+
+  function renderGlobeControls() {
+    const concept = variation.visualConcept ?? 'geometric';
+    const show = isGlobeConcept(concept);
+    globeControlsGroup?.toggleAttribute('hidden', !show);
+    if (!show || !globeShapeSelect) return;
+
+    globeShapeSelect.innerHTML = GLOBE_SHAPE_MODES.map(({ id, label }) =>
+      `<option value="${id}"${variation.globeShapeMode === id ? ' selected' : ''}>${label}</option>`,
+    ).join('');
+
+    if (globeDetailSlider) globeDetailSlider.value = String(variation.globeDetail ?? 50);
+    if (globeDetailVal) globeDetailVal.textContent = `${variation.globeDetail ?? 50}%`;
+
+    if (globeTubeProfileSelect) {
+      globeTubeProfileSelect.innerHTML = GLOBE_TUBE_PROFILES.map(({ id, label }) =>
+        `<option value="${id}"${(variation.globeTubeProfile ?? 'round') === id ? ' selected' : ''}>${label}</option>`,
+      ).join('');
+    }
+  }
+
+  function renderLiquidControls() {
+    const concept = variation.visualConcept ?? 'geometric';
+    const show = isLavaConcept(concept);
+    liquidControlsGroup?.toggleAttribute('hidden', !show);
+    if (!show) return;
+
+    if (lavaControlsLabel) lavaControlsLabel.textContent = 'Volcano lava';
+    if (lavaControlsHint) {
+      lavaControlsHint.textContent =
+        'Palette colors erupt from the summit vent and flow downhill in thick streams.';
+    }
+
+    liquidFlowSpeedSlider.value = String(variation.liquidFlowSpeed);
+    liquidThicknessSlider.value = String(variation.liquidThickness);
+    liquidReliefSlider.value = String(variation.liquidRelief);
+    liquidTurbulenceSlider.value = String(variation.liquidTurbulence);
   }
 
   function renderSpeedControls() {
@@ -1081,11 +1581,16 @@ function setupVariationPanel() {
   visualConceptSelect?.addEventListener('change', () => {
     variation.visualConcept = visualConceptSelect.value;
     renderShapeToggles();
+    renderLiquidControls();
+    renderGlobeControls();
+    renderLivingSongControls();
     applyVariation(true);
+    syncCinematicPanelVisibility();
   });
 
   function renderShapeToggles() {
     const showShapes = isGeometricConcept(variation.visualConcept ?? 'geometric');
+    shapeTypesBlock?.toggleAttribute('hidden', !showShapes);
     shapeTypesLabel?.toggleAttribute('hidden', !showShapes);
     shapeToggles?.toggleAttribute('hidden', !showShapes);
     if (!showShapes) return;
@@ -1160,6 +1665,7 @@ function setupVariationPanel() {
   speedSpreadSlider.value = String(variation.speedSpread);
   layoutSpreadSlider.value = String(variation.layoutSpread);
   fixedLayoutCheck.checked = variation.fixedLayout !== false;
+  if (elementUnicolorCheck) elementUnicolorCheck.checked = !!variation.elementUnicolor;
   depthRangeSlider.value = String(variation.depthRange);
   manualSpeedCheck.checked = variation.manualSpeed;
   manualSpeedSlider.value = String(variation.manualSpeedValue);
@@ -1170,8 +1676,17 @@ function setupVariationPanel() {
   kantenCheck.checked = variation.kanten;
   kantenToggle?.classList.toggle('active', variation.kanten);
   cornerRoundSlider.value = String(variation.cornerRound);
+  if (shapeCountInput) shapeCountInput.value = String(variation.shapeCount);
+  if (elementMotionSlider) elementMotionSlider.value = String(variation.elementMotion ?? 50);
+  if (elementTurnSlider) elementTurnSlider.value = String(variation.elementTurn ?? 50);
+  if (element3dMotionSlider) element3dMotionSlider.value = String(variation.element3dMotion ?? 50);
+  if (surfaceWobbleSlider) surfaceWobbleSlider.value = String(variation.surfaceWobble ?? 0);
+  if (backgroundDepthSlider) backgroundDepthSlider.value = String(variation.backgroundDepth ?? 50);
   renderColorModeSelect();
   renderShapeToggles();
+  renderLiquidControls();
+  renderGlobeControls();
+  renderLivingSongControls();
   renderSpeedControls();
   syncSliderLabels();
 
@@ -1183,6 +1698,7 @@ function setupVariationPanel() {
     speedSpreadSlider.value = String(variation.speedSpread);
     layoutSpreadSlider.value = String(variation.layoutSpread);
     fixedLayoutCheck.checked = variation.fixedLayout !== false;
+    if (elementUnicolorCheck) elementUnicolorCheck.checked = !!variation.elementUnicolor;
     depthRangeSlider.value = String(variation.depthRange);
     manualSpeedCheck.checked = variation.manualSpeed;
     manualSpeedSlider.value = String(variation.manualSpeedValue);
@@ -1193,10 +1709,22 @@ function setupVariationPanel() {
     kantenCheck.checked = variation.kanten;
     kantenToggle?.classList.toggle('active', variation.kanten);
     cornerRoundSlider.value = String(variation.cornerRound);
+    liquidFlowSpeedSlider.value = String(variation.liquidFlowSpeed);
+    liquidThicknessSlider.value = String(variation.liquidThickness);
+    liquidReliefSlider.value = String(variation.liquidRelief);
+    liquidTurbulenceSlider.value = String(variation.liquidTurbulence);
+    if (elementMotionSlider) elementMotionSlider.value = String(variation.elementMotion ?? 50);
+    if (elementTurnSlider) elementTurnSlider.value = String(variation.elementTurn ?? 50);
+    if (element3dMotionSlider) element3dMotionSlider.value = String(variation.element3dMotion ?? 50);
+    if (surfaceWobbleSlider) surfaceWobbleSlider.value = String(variation.surfaceWobble ?? 0);
+  if (backgroundDepthSlider) backgroundDepthSlider.value = String(variation.backgroundDepth ?? 50);
     colorModeSelect.value = variation.colorMode;
     renderColorModeSelect();
     renderVisualConceptSelect();
     renderShapeToggles();
+    renderLiquidControls();
+    renderGlobeControls();
+    renderLivingSongControls();
     renderSpeedControls();
     syncSliderLabels();
   }
@@ -1207,16 +1735,118 @@ function setupVariationPanel() {
     syncSliderLabels();
   });
 
+  globeShapeSelect?.addEventListener('change', () => {
+    variation.globeShapeMode = globeShapeSelect.value;
+    applyVariation(true);
+  });
+
+  globeDetailSlider?.addEventListener('input', () => {
+    variation.globeDetail = Number(globeDetailSlider.value);
+    if (globeDetailVal) globeDetailVal.textContent = `${variation.globeDetail}%`;
+    applyVariation(true);
+  });
+
+  globeTubeProfileSelect?.addEventListener('change', () => {
+    variation.globeTubeProfile = globeTubeProfileSelect.value;
+    applyVariation(false);
+  });
+
   bindSlider(colorShiftSlider, 'colorShift', '%', false);
   bindSlider(shapeCountSlider, 'shapeCount', '', true);
+  shapeCountSlider.addEventListener('input', () => {
+    if (shapeCountInput) shapeCountInput.value = shapeCountSlider.value;
+  });
+  shapeCountInput?.addEventListener('change', () => {
+    const n = Math.max(1, Math.min(28, Math.round(Number(shapeCountInput.value) || variation.shapeCount)));
+    variation.shapeCount = n;
+    shapeCountSlider.value = String(n);
+    shapeCountVal.textContent = String(n);
+    shapeCountInput.value = String(n);
+    applyVariation(true);
+  });
   bindSlider(sizeSpreadSlider, 'sizeSpread', '%', true);
+
+  function syncElementSizeSliders() {
+    let from = variation.elementSizeFrom ?? 45;
+    let to = variation.elementSizeTo ?? 100;
+    if (from > to) {
+      if (document.activeElement === elementSizeFromSlider) to = from;
+      else from = to;
+      variation.elementSizeFrom = from;
+      variation.elementSizeTo = to;
+    }
+    if (elementSizeFromSlider) elementSizeFromSlider.value = String(from);
+    if (elementSizeToSlider) elementSizeToSlider.value = String(to);
+    if (elementSizeFromVal) elementSizeFromVal.textContent = `${from}%`;
+    if (elementSizeToVal) elementSizeToVal.textContent = `${to}%`;
+  }
+
+  function bindElementSizeSlider(slider, key) {
+    if (!slider) return;
+    slider.addEventListener('input', () => {
+      variation[key] = Number(slider.value);
+      syncElementSizeSliders();
+      applyVariation(true);
+    });
+    slider.addEventListener('change', () => {
+      variation[key] = Number(slider.value);
+      syncElementSizeSliders();
+      applyVariation(true);
+    });
+  }
+
+  bindElementSizeSlider(elementSizeFromSlider, 'elementSizeFrom');
+  bindElementSizeSlider(elementSizeToSlider, 'elementSizeTo');
+
+  function syncElementDistanceSliders() {
+    let from = variation.elementDistanceFrom ?? 42;
+    let to = variation.elementDistanceTo ?? 74;
+    if (from > to) {
+      if (document.activeElement === elementDistanceFromSlider) to = from;
+      else from = to;
+      variation.elementDistanceFrom = from;
+      variation.elementDistanceTo = to;
+    }
+    if (elementDistanceFromSlider) elementDistanceFromSlider.value = String(from);
+    if (elementDistanceToSlider) elementDistanceToSlider.value = String(to);
+    if (elementDistanceFromVal) elementDistanceFromVal.textContent = `${from}%`;
+    if (elementDistanceToVal) elementDistanceToVal.textContent = `${to}%`;
+  }
+
+  function bindElementDistanceSlider(slider, key) {
+    if (!slider) return;
+    slider.addEventListener('input', () => {
+      variation[key] = Number(slider.value);
+      syncElementDistanceSliders();
+      applyVariation(true);
+    });
+    slider.addEventListener('change', () => {
+      variation[key] = Number(slider.value);
+      syncElementDistanceSliders();
+      applyVariation(true);
+    });
+  }
+
+  bindElementDistanceSlider(elementDistanceFromSlider, 'elementDistanceFrom');
+  bindElementDistanceSlider(elementDistanceToSlider, 'elementDistanceTo');
+
   bindSlider(spinIntensitySlider, 'spinIntensity', '%', false);
   bindSlider(speedSpreadSlider, 'speedSpread', '%', true);
   bindSlider(layoutSpreadSlider, 'layoutSpread', '%', true);
   bindSlider(depthRangeSlider, 'depthRange', '%', true);
+  bindSlider(elementMotionSlider, 'elementMotion', '%', false);
+  bindSlider(elementTurnSlider, 'elementTurn', '%', false);
+  bindSlider(element3dMotionSlider, 'element3dMotion', '%', false);
+  bindSlider(surfaceWobbleSlider, 'surfaceWobble', '%', false);
+  bindSlider(backgroundDepthSlider, 'backgroundDepth', '%', false);
 
   fixedLayoutCheck.addEventListener('change', () => {
     variation.fixedLayout = fixedLayoutCheck.checked;
+    applyVariation(false);
+  });
+
+  elementUnicolorCheck?.addEventListener('change', () => {
+    variation.elementUnicolor = elementUnicolorCheck.checked;
     applyVariation(false);
   });
 
@@ -1245,6 +1875,11 @@ function setupVariationPanel() {
 
   bindSlider(cornerRoundSlider, 'cornerRound', '%', false);
 
+  bindSlider(liquidFlowSpeedSlider, 'liquidFlowSpeed', '%', false);
+  bindSlider(liquidThicknessSlider, 'liquidThickness', '%', false);
+  bindSlider(liquidReliefSlider, 'liquidRelief', '%', false);
+  bindSlider(liquidTurbulenceSlider, 'liquidTurbulence', '%', false);
+
   kantenCheck.addEventListener('change', () => {
     variation.kanten = kantenCheck.checked;
     kantenToggle?.classList.toggle('active', variation.kanten);
@@ -1260,6 +1895,7 @@ function setupVariationPanel() {
     speedSpreadSlider.value = String(variation.speedSpread);
     layoutSpreadSlider.value = String(variation.layoutSpread);
     fixedLayoutCheck.checked = variation.fixedLayout !== false;
+    if (elementUnicolorCheck) elementUnicolorCheck.checked = !!variation.elementUnicolor;
     depthRangeSlider.value = String(variation.depthRange);
     manualSpeedCheck.checked = variation.manualSpeed;
     manualSpeedSlider.value = String(variation.manualSpeedValue);
@@ -1270,8 +1906,20 @@ function setupVariationPanel() {
     kantenCheck.checked = variation.kanten;
     kantenToggle?.classList.toggle('active', variation.kanten);
     cornerRoundSlider.value = String(variation.cornerRound);
+    liquidFlowSpeedSlider.value = String(variation.liquidFlowSpeed);
+    liquidThicknessSlider.value = String(variation.liquidThickness);
+    liquidReliefSlider.value = String(variation.liquidRelief);
+    liquidTurbulenceSlider.value = String(variation.liquidTurbulence);
+    if (elementMotionSlider) elementMotionSlider.value = String(variation.elementMotion ?? 50);
+    if (elementTurnSlider) elementTurnSlider.value = String(variation.elementTurn ?? 50);
+    if (element3dMotionSlider) element3dMotionSlider.value = String(variation.element3dMotion ?? 50);
+    if (surfaceWobbleSlider) surfaceWobbleSlider.value = String(variation.surfaceWobble ?? 0);
+  if (backgroundDepthSlider) backgroundDepthSlider.value = String(variation.backgroundDepth ?? 50);
     colorModeSelect.value = variation.colorMode;
     renderShapeToggles();
+    renderLiquidControls();
+    renderGlobeControls();
+    renderLivingSongControls();
     regenerateOnNextApply = true;
     resetPlayhead();
     applyVariation(true);
@@ -1281,6 +1929,9 @@ function setupVariationPanel() {
     syncFromStores() {
       variation = loadVariation();
       syncVariationUI();
+    },
+    refreshLivingControls() {
+      renderLivingSongControls();
     },
   };
 }
@@ -1295,6 +1946,24 @@ function drawIdleFrame() {
   }
 }
 
+function syncMuteButton() {
+  if (!muteBtn) return;
+  muteBtn.textContent = isMuted ? 'Unmute' : 'Mute';
+  muteBtn.setAttribute('aria-pressed', isMuted ? 'true' : 'false');
+  muteBtn.title = isMuted ? 'Unmute audio output' : 'Mute audio output';
+  muteBtn.classList.toggle('muted', isMuted);
+}
+
+function applyMuteState() {
+  if (gainNode) gainNode.gain.value = isMuted ? 0 : 1;
+  syncMuteButton();
+}
+
+function toggleMute() {
+  isMuted = !isMuted;
+  applyMuteState();
+}
+
 function ensureAudioGraph() {
   if (!audioContext) {
     audioContext = new AudioContext();
@@ -1304,6 +1973,7 @@ function ensureAudioGraph() {
     gainNode = audioContext.createGain();
     analyserNode.connect(gainNode);
     gainNode.connect(audioContext.destination);
+    applyMuteState();
   }
 }
 
@@ -1318,7 +1988,7 @@ async function togglePlay() {
   ensureAudioGraph();
   if (audioContext.state === 'suspended') await audioContext.resume();
 
-  resetLiveBeatState();
+  if (playOffset <= 0) resetLiveBeatState();
 
   sourceNode = audioContext.createBufferSource();
   sourceNode.buffer = audioBuffer;
@@ -1360,8 +2030,8 @@ function stopPlayback() {
   cancelAnimationFrame(previewRAF);
   resetLiveBeatState();
   if (audioBuffer) {
-    syncPlayheadSlider(0, audioBuffer.duration);
-    updateTimeDisplay(0, audioBuffer.duration);
+    syncPlayheadSlider(0, clipDisplayDuration());
+    updateTimeDisplay(0, clipDisplayDuration());
     resetPlayhead();
     refreshPreview();
   }
@@ -1399,32 +2069,129 @@ function formatTime(seconds) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function downloadRemuxScript(baseName, withAudio) {
+  const ts = `${baseName}-visualizer.ts`;
+  const mp4 = `${baseName}-visualizer.mp4`;
+  const audio = `${baseName}-visualizer-audio.m4a`;
+  const lines = withAudio
+    ? [
+      '#!/bin/bash',
+      '# Run in the folder where you saved the export files',
+      `ffmpeg -f mpegts -i "${ts}" -c copy -movflags +faststart "${mp4}"`,
+      `ffmpeg -i "${mp4}" -i "${audio}" -c copy "${baseName}-final.mp4"`,
+      `echo "Done: ${baseName}-final.mp4"`,
+    ]
+    : [
+      '#!/bin/bash',
+      '# Run in the folder where you saved the export file',
+      `ffmpeg -f mpegts -i "${ts}" -c copy -movflags +faststart "${mp4}"`,
+      `echo "Done: ${mp4}"`,
+    ];
+  const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${baseName}-remux.sh`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 async function handleExport(preview = false) {
   if (!audioFile || !analysis) return;
-
-  const { startTime, endTime } = preview ? getClipRange() : { startTime: 0, endTime: null };
-  if (preview && endTime - startTime < 0.2) {
-    alert('Preview clip must be at least 0.2 seconds.');
+  if (exportInProgress) {
+    alert('An export is already running. Wait for it to finish or let it run in the background.');
     return;
   }
 
-  stopPlayback();
+  const { startTime, endTime } = getClipRange();
+  if (endTime - startTime < 0.2) {
+    alert('Clip must be at least 0.2 seconds (check From / To).');
+    return;
+  }
+
+  exportInProgress = true;
   exportBtn.disabled = true;
   previewExportBtn.disabled = true;
-  playBtn.disabled = true;
   showCreateProgress(true);
-  setCreateProgress(0, preview ? 'Starting preview export…' : 'Starting full export…');
+  setCreateProgress(0, preview ? 'Starting preview export…' : 'Starting export…');
+
+  /** @type {FileSystemWritableFileStream|null} */
+  let outputWritable = null;
+  /** @type {FileSystemFileHandle|null} */
+  let outputFileHandle = null;
+  const includeAudio = exportAudioCheck?.checked === true;
 
   try {
-    const mp4 = await exportToMp4({
+    if (!preview && typeof window.showSaveFilePicker === 'function') {
+      try {
+        const base = audioFile.name.replace(/\.(mp3|wav|m4a|flac|ogg|aac)$/i, '');
+        const handle = await window.showSaveFilePicker({
+          suggestedName: `${base}-visualizer.ts`,
+          types: [{
+            description: 'Video (MPEG-TS stream)',
+            accept: { 'video/mp2t': ['.ts'], 'video/mp4': ['.mp4'] },
+          }],
+        });
+        outputFileHandle = handle;
+        outputWritable = await handle.createWritable();
+      } catch (pickErr) {
+        if (pickErr?.name === 'AbortError') {
+          setCreateProgress(0, 'Export cancelled');
+          return;
+        }
+        alert(
+          'Could not open save dialog. Use Chrome or Edge, click Export once, and choose where to save.\n\n'
+          + `(${String(pickErr?.message ?? pickErr)})`,
+        );
+        setCreateProgress(0, 'Export cancelled');
+        return;
+      }
+    } else if (!preview && !includeAudio) {
+      alert(
+        'Full export requires Chrome or Edge so you can pick a save location.\n'
+        + 'The file is written directly to disk in segments (no large download in memory).',
+      );
+      setCreateProgress(0, 'Export cancelled');
+      return;
+    }
+
+    const result = await exportToMp4({
       analysis,
       audioFile,
+      audioBuffer: includeAudio ? audioBuffer : null,
       onProgress: (pct, label) => setCreateProgress(pct, label),
       startTime,
       endTime,
       preview,
+      includeAudio,
+      outputWritable,
+      outputFileHandle,
       automationKeyframes: automation.exportData(),
     });
+
+    if (result && typeof result === 'object' && result.streamed) {
+      const mb = Math.round(result.byteLength / (1024 * 1024));
+      if (result.audioSidecar) {
+        const remux = result.needsRemux
+          ? ' Video is MPEG-TS — convert: ffmpeg -i "your-file.ts" -c copy -movflags +faststart video.mp4'
+          : '';
+        setCreateProgress(
+          100,
+          `Video saved (${mb} MB). Audio downloaded as .m4a.${remux}`,
+        );
+        if (result.needsRemux) {
+          downloadRemuxScript(audioFile.name.replace(/\.(mp3|wav|m4a|flac|ogg|aac)$/i, ''), true);
+        }
+      } else if (result.needsRemux) {
+        setCreateProgress(100, `Video saved (${mb} MB, MPEG-TS). Remux script downloaded.`);
+        downloadRemuxScript(audioFile.name.replace(/\.(mp3|wav|m4a|flac|ogg|aac)$/i, ''), false);
+      } else {
+        setCreateProgress(100, `Saved to file (${mb} MB)`);
+      }
+      return;
+    }
+
+    const mp4 = /** @type {Blob} */ (result);
 
     const url = URL.createObjectURL(mp4);
     const a = document.createElement('a');
@@ -1439,13 +2206,12 @@ async function handleExport(preview = false) {
     setCreateProgress(100, 'Download started');
   } catch (err) {
     console.error(err);
-    alert(`Export failed: ${err.message}\n\nTry a shorter clip, or use Chrome/Edge for best results.`);
+    alert(`Export failed: ${String(err?.message ?? err ?? 'Unknown error')}\n\nTry a shorter clip, or use Chrome/Edge for best results.`);
     setCreateProgress(0, 'Export failed');
   } finally {
+    exportInProgress = false;
     exportBtn.disabled = false;
     previewExportBtn.disabled = !audioBuffer;
-    playBtn.disabled = false;
-    refreshPreview();
     setTimeout(() => {
       showCreateProgress(false);
       setCreateProgress(0, '');
@@ -1479,7 +2245,9 @@ function resetState(clearAudioLabel = true) {
   audioFile = null;
   audioBuffer = null;
   analysis = null;
+  audioSourceUrl = null;
   playOffset = 0;
+  setSongDuration(0);
   automation.clear();
   clearAutomationSample();
   syncAutomationControls();
@@ -1487,6 +2255,7 @@ function resetState(clearAudioLabel = true) {
   if (clearAudioLabel) fileNameEl.textContent = 'No audio loaded';
   playBtn.disabled = true;
   stopBtn.disabled = true;
+  if (muteBtn) muteBtn.disabled = true;
   exportBtn.disabled = true;
   syncClipRangeInputs();
   setUploadProgress(0, '');

@@ -9,7 +9,7 @@ export function initGlassDiscs(ctx) {
   const positions = curatedLayout(count, width, height, spread, rng);
 
   const entities = positions.map((pos, i) => {
-    const e = createBaseEntity(pos, i, variation, rng, palette.length);
+    const e = createBaseEntity(pos, i, variation, rng, palette.length, count);
     const radius = 55 + rng() * 75;
     e.conceptData = {
       radius,

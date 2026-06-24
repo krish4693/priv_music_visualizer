@@ -5,6 +5,7 @@ export const POP_ART_COLORS = [
   { r: 255, g: 232, b: 0, name: 'Vivid Lemon Yellow' },
   { r: 0, g: 72, b: 255, name: 'Bold Cobalt Blue' },
   { r: 0, g: 200, b: 100, name: 'Brilliant Emerald Green' },
+  { r: 245, g: 245, b: 250, name: 'Soft White' },
 ];
 
 export const POP_ART_ALPHA = 1;

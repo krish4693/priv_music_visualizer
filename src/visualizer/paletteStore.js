@@ -3,6 +3,13 @@ import { POP_ART_COLORS } from './popArtPalette.js';
 const PALETTE_KEY = 'visualizer-custom-colors';
 const SELECTION_KEY = 'visualizer-palette-selection';
 
+export const DEFAULT_PALETTE_COLOR_COUNT = 6;
+
+export function defaultSelectedIndices(full) {
+  const count = Math.min(DEFAULT_PALETTE_COLOR_COUNT, full.length);
+  return new Set(Array.from({ length: count }, (_, i) => i));
+}
+
 function colorKey(c) {
   return `${c.r},${c.g},${c.b}`;
 }
@@ -38,16 +45,16 @@ export function saveCustomColors(customOnly) {
 export function loadSelectedIndices(full) {
   try {
     const raw = localStorage.getItem(SELECTION_KEY);
-    if (!raw) return new Set(full.map((_, i) => i));
+    if (!raw) return defaultSelectedIndices(full);
     const keys = JSON.parse(raw);
-    if (!Array.isArray(keys)) return new Set(full.map((_, i) => i));
+    if (!Array.isArray(keys)) return defaultSelectedIndices(full);
     const indices = new Set();
     full.forEach((c, i) => {
       if (keys.includes(colorKey(c))) indices.add(i);
     });
-    return indices.size ? indices : new Set(full.map((_, i) => i));
+    return indices.size ? indices : defaultSelectedIndices(full);
   } catch {
-    return new Set(full.map((_, i) => i));
+    return defaultSelectedIndices(full);
   }
 }
 

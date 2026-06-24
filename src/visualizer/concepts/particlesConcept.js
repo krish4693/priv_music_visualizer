@@ -11,7 +11,7 @@ export function initParticles(ctx) {
   const particlesPer = 18;
 
   const entities = positions.map((pos, i) => {
-    const e = createBaseEntity(pos, i, variation, rng, palette.length);
+    const e = createBaseEntity(pos, i, variation, rng, palette.length, count);
     e.rotSpeedX = spreadSpinAxis(rng, 0.4, 0.5, variation.speedSpread / 100);
     e.rotSpeedY = spreadSpinAxis(rng, 0.35, 0.5, variation.speedSpread / 100);
     e.rotSpeedZ = spreadSpinAxis(rng, 0.3, 0.5, variation.speedSpread / 100);

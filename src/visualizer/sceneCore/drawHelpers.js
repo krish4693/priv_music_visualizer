@@ -1,4 +1,5 @@
 import { popArtColor } from '../popArtPalette.js';
+import { applyViewZoom } from '../viewZoom.js';
 
 export function parseRgb(css) {
   const m = css.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
@@ -21,6 +22,22 @@ export function entityColor(palette, colorIdx, colorOffset, blend = 0) {
   return popArtColor(palette, colorIdx + colorOffset, blend, 1);
 }
 
+/** Solid color for one snake/tube — always one palette swatch, never per-face stripes. */
+export function livingSnakeColor(palette, colorIdx, colorOffset = 0) {
+  return entityColor(palette, colorIdx, colorOffset);
+}
+
 export function projectDepth(z, rotY = 0) {
   return z + Math.sin(rotY) * 12;
+}
+
+export function sceneCameraZoom(scene) {
+  return scene.cinematicSettings?.cameraZoom ?? 50;
+}
+
+export function zoomProjectedPoints(projected, width, height, cameraZoom) {
+  return projected.map((p) => {
+    const z = applyViewZoom(p.x, p.y, width, height, cameraZoom);
+    return { ...p, x: z.x, y: z.y };
+  });
 }

@@ -1,12 +1,20 @@
 import { normalizeVisualConcept, isGeometricConcept } from '../visualConceptStore.js';
+import { resolveLivingElementCount } from '../elementMotion.js';
 import { initParticles, updateParticles } from './particlesConcept.js';
 import { initTypography, updateTypography } from './typographyConcept.js';
 import { initConstellation, updateConstellation } from './constellationConcept.js';
 import { initBlobs, updateBlobs } from './blobsConcept.js';
 import { initGlassDiscs, updateGlassDiscs } from './glassDiscsConcept.js';
 import { initOrigami, updateOrigami } from './origamiConcept.js';
+import { initLiquidsOnCanvas, updateLiquidsOnCanvas } from './liquidsOnCanvasConcept.js';
+import { initVisualLivingSong, updateVisualLivingSong } from './visualLivingSongConcept.js';
+import { initVisualLivingSong3d, updateVisualLivingSong3d } from './visualLivingSong3dConcept.js';
+import { initVisualLivingSongSnake, updateVisualLivingSongSnake } from './visualLivingSongSnakeConcept.js';
+import { initVisualLivingSongGlobe, updateVisualLivingSongGlobe, resetLivingSongGlobe } from './visualLivingSongGlobeConcept.js';
+import { resetLivingSong } from './visualLivingSongConcept.js';
 import {
   drawConceptPopArt,
+  drawLivingSongOverlays,
   syncConceptCinematic,
   disposeConceptCinematic,
   applyConceptTransforms,
@@ -22,6 +30,11 @@ const INIT_MAP = {
   blobs: { init: initBlobs, update: updateBlobs },
   glassDiscs: { init: initGlassDiscs, update: updateGlassDiscs },
   origami: { init: initOrigami, update: updateOrigami },
+  liquidsOnCanvas: { init: initLiquidsOnCanvas, update: updateLiquidsOnCanvas },
+  visualLivingSong: { init: initVisualLivingSong, update: updateVisualLivingSong },
+  visualLivingSong3d: { init: initVisualLivingSong3d, update: updateVisualLivingSong3d },
+  visualLivingSongSnake: { init: initVisualLivingSongSnake, update: updateVisualLivingSongSnake },
+  visualLivingSongGlobe: { init: initVisualLivingSongGlobe, update: updateVisualLivingSongGlobe },
 };
 
 export { isGeometricConcept, normalizeVisualConcept };
@@ -64,7 +77,16 @@ export function initConceptEntities(scene, width, height) {
 export function updateConceptExtras(scene, ctx) {
   const conceptId = getActiveConceptId(scene.variation);
   const mod = INIT_MAP[conceptId];
-  mod?.update?.(scene.shapes, scene._conceptState ?? {}, { ...ctx, rng: scene.rng });
+    mod?.update?.(scene.shapes, scene._conceptState ?? {}, {
+    ...ctx,
+    variation: scene.variation,
+    palette: scene.palette,
+    rng: scene.rng,
+    fixedLayout: scene.variation.fixedLayout !== false,
+    layoutSpread: scene.variation.layoutSpread,
+    sceneWidth: scene.width,
+    sceneHeight: scene.height,
+  });
 }
 
 /** @param {object} scene @param {CanvasRenderingContext2D} ctx */
@@ -93,4 +115,15 @@ export function disposeConceptScene(scene) {
   disposeConceptCinematic(scene);
 }
 
-export { clearConceptObjects };
+export { clearConceptObjects, drawLivingSongOverlays };
+
+/** Reset living-song state (2D, 3D, snake, globe). */
+export function resetLivingSongState(variation, state, rng, paletteLength) {
+  const count = resolveLivingElementCount(variation, paletteLength);
+  const conceptId = getActiveConceptId(variation);
+  if (conceptId === 'visualLivingSongGlobe') {
+    resetLivingSongGlobe(state, rng, count);
+  } else {
+    resetLivingSong(state, rng, count);
+  }
+}

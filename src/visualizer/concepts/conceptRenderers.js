@@ -7,11 +7,23 @@ import {
   buildBoxMesh,
   flatMeshForPreset,
 } from '../math3d.js';
-import { entityColor, shadeColor, edgeStrokeColor, projectDepth } from '../sceneCore/drawHelpers.js';
+import { applyViewZoom, viewZoomMultiplier } from '../viewZoom.js';
+import { entityColor, livingSnakeColor, shadeColor, edgeStrokeColor, projectDepth, sceneCameraZoom, zoomProjectedPoints } from '../sceneCore/drawHelpers.js';
 import { particleDotWorld } from './particlesConcept.js';
 import { origamiFoldAngle } from './origamiConcept.js';
 import { cinematicMaterial, updateCinematicMaterial, UNIT as MESH_UNIT } from '../three/shapeFactory.js';
 import { applyEntityTransform, paletteColorThree, screenToWorld } from '../sceneCore/cinematicHelpers.js';
+import {
+  livingSongRiverPaths,
+  livingSongRiverProgress,
+  livingSongWidthScale,
+} from './visualLivingSongConcept.js';
+import { drawVisualLivingSong3D } from './livingSong3dDraw.js';
+import { drawVisualLivingSongSnake } from './livingSongSnakeDraw.js';
+import { drawVisualLivingSongGlobe } from './livingSongGlobeDraw.js';
+import { livingMotionScale, livingSongMotionParams, resolveLivingRiverCount, wobbleLivingSongPath2d } from '../livingSongDrawHelpers.js';
+import { elementSizeMultiplier, resolveLivingElementCount } from '../elementMotion.js';
+import { livingSnakeLaneRiver } from '../livingSnakeLanes.js';
 
 function drawProjectedFaces(lc, drawables, showEdges) {
   for (const d of drawables) {
@@ -30,13 +42,18 @@ function drawProjectedFaces(lc, drawables, showEdges) {
   }
 }
 
-function meshDrawables(mesh, rot, offset, w, h, baseFill, showEdges) {
+function meshDrawables(mesh, rot, offset, w, h, baseFill, showEdges, cameraZoom = 50) {
   const drawables = [];
   for (const face of mesh) {
     const worldVerts = face.verts.map((v) => transformVertex(v, rot, offset));
     const viewNormal = rotateNormal(face.normal, rot);
     if (viewNormal[2] <= 0.05) continue;
-    const projected = worldVerts.map((v) => projectPoint(v, w, h));
+    const projected = zoomProjectedPoints(
+      worldVerts.map((v) => projectPoint(v, w, h)),
+      w,
+      h,
+      cameraZoom,
+    );
     const avgZ = projected.reduce((acc, p) => acc + p.z, 0) / projected.length;
     const shade = shadeFactor(viewNormal);
     const fill = shadeColor(baseFill, shade);
@@ -67,6 +84,16 @@ export function drawConceptPopArt(scene, ctx) {
       return drawGlassDiscsPopArt(scene, ctx);
     case 'origami':
       return drawOrigamiPopArt(scene, ctx);
+    case 'liquidsOnCanvas':
+      return drawLiquidsPopArt(scene, ctx);
+    case 'visualLivingSong':
+      return drawVisualLivingSongPopArt(scene, ctx);
+    case 'visualLivingSong3d':
+      return drawVisualLivingSong3D(scene, ctx);
+    case 'visualLivingSongSnake':
+      return drawVisualLivingSongSnake(scene, ctx);
+    case 'visualLivingSongGlobe':
+      return drawVisualLivingSongGlobe(scene, ctx);
     default:
       return false;
   }
@@ -77,17 +104,19 @@ function drawParticlesPopArt(scene, ctx) {
   const { shapes, width, height, palette, colorOffset, damped } = scene;
   const mot = damped.motion;
   const geo = damped.geometry;
+  const zoom = sceneCameraZoom(scene);
   const items = [];
 
   for (const e of shapes) {
     if (!e.conceptData?.dots) continue;
     for (const dot of e.conceptData.dots) {
       const p = particleDotWorld(e, dot, mot, geo);
+      const z = applyViewZoom(p.x, p.y, width, height, zoom);
       items.push({
-        x: p.x,
-        y: p.y,
+        x: z.x,
+        y: z.y,
         z: projectDepth(p.z, e.rotY),
-        r: p.size,
+        r: p.size * viewZoomMultiplier(zoom),
         color: entityColor(palette, e.colorIdx, colorOffset),
       });
     }
@@ -111,6 +140,7 @@ function drawTypographyPopArt(scene, ctx) {
   const w = width;
   const h = height;
   const showEdges = !!variation.kanten;
+  const zoom = sceneCameraZoom(scene);
   const sorted = [...shapes].sort((a, b) => projectDepth(a.z, a.rotY) - projectDepth(b.z, b.rotY));
 
   for (const e of sorted) {
@@ -133,10 +163,10 @@ function drawTypographyPopArt(scene, ctx) {
       const cw = Math.max(col.uw * footW, 2);
       const mesh = buildBoxMesh(cw, standH, Math.max(lz1 - lz0, 2), 0);
       const colOffset = [offset[0] + lx, offset[1] + standH * 0.5, offset[2] + (lz0 + lz1) * 0.5];
-      drawables.push(...meshDrawables(mesh, rot, colOffset, w, h, baseFill, showEdges));
+      drawables.push(...meshDrawables(mesh, rot, colOffset, w, h, baseFill, showEdges, zoom));
       const sideMesh = buildBoxMesh(cw, standH * 0.15, Math.max(lz1 - lz0, 2), 0);
       const sideOffset = [offset[0] + lx, offset[1] + standH * 1.05, offset[2] + (lz0 + lz1) * 0.5];
-      drawables.push(...meshDrawables(sideMesh, rot, sideOffset, w, h, sideFill, showEdges));
+      drawables.push(...meshDrawables(sideMesh, rot, sideOffset, w, h, sideFill, showEdges, zoom));
     }
 
     drawables.sort((a, b) => a.avgZ - b.avgZ);
@@ -147,15 +177,20 @@ function drawTypographyPopArt(scene, ctx) {
 
 /** @param {object} scene @param {CanvasRenderingContext2D} ctx */
 function drawConstellationPopArt(scene, ctx) {
-  const { shapes, palette, colorOffset, _conceptState } = scene;
+  const { shapes, palette, colorOffset, _conceptState, width, height } = scene;
   const state = _conceptState ?? { edges: [], edgePulse: [] };
-  const nodes = shapes.map((e) => ({
-    x: e.x,
-    y: e.y,
-    z: projectDepth(e.z, e.rotY),
-    r: e.conceptData.nodeSize * e.scale,
-    color: entityColor(palette, e.colorIdx, colorOffset),
-  }));
+  const zoom = sceneCameraZoom(scene);
+  const zm = viewZoomMultiplier(zoom);
+  const nodes = shapes.map((e) => {
+    const z = applyViewZoom(e.x, e.y, width, height, zoom);
+    return {
+      x: z.x,
+      y: z.y,
+      z: projectDepth(e.z, e.rotY),
+      r: e.conceptData.nodeSize * e.scale * zm,
+      color: entityColor(palette, e.colorIdx, colorOffset),
+    };
+  });
 
   for (let i = 0; i < state.edges.length; i++) {
     const edge = state.edges[i];
@@ -188,6 +223,7 @@ function drawConstellationPopArt(scene, ctx) {
 function drawBlobsPopArt(scene, ctx) {
   const { shapes, width, height, palette, colorOffset, variation } = scene;
   const showEdges = !!variation.kanten;
+  const zoom = sceneCameraZoom(scene);
   const sorted = [...shapes].sort((a, b) => projectDepth(a.z, a.rotY) - projectDepth(b.z, b.rotY));
 
   for (const e of sorted) {
@@ -204,7 +240,7 @@ function drawBlobsPopArt(scene, ctx) {
     ];
     const rot = [e.rotX + (e.tiltX ?? 0), e.rotY, e.rotZ + (e.tiltZ ?? 0)];
     const baseFill = entityColor(palette, e.colorIdx, colorOffset);
-    const drawables = meshDrawables(mesh, rot, offset, width, height, baseFill, showEdges);
+    const drawables = meshDrawables(mesh, rot, offset, width, height, baseFill, showEdges, zoom);
     drawProjectedFaces(ctx, drawables, showEdges);
   }
   return true;
@@ -212,18 +248,21 @@ function drawBlobsPopArt(scene, ctx) {
 
 /** @param {object} scene @param {CanvasRenderingContext2D} ctx */
 function drawGlassDiscsPopArt(scene, ctx) {
-  const { shapes, palette, colorOffset } = scene;
+  const { shapes, palette, colorOffset, width, height } = scene;
+  const zoom = sceneCameraZoom(scene);
+  const zm = viewZoomMultiplier(zoom);
   const sorted = [...shapes].sort((a, b) => projectDepth(a.z, a.rotY) - projectDepth(b.z, b.rotY));
 
   for (const e of sorted) {
-    const r = e.conceptData.radius * e.scale;
+    const z = applyViewZoom(e.x, e.y, width, height, zoom);
+    const r = e.conceptData.radius * e.scale * zm;
     const base = entityColor(palette, e.colorIdx, colorOffset);
-    const grad = ctx.createRadialGradient(e.x - r * 0.25, e.y - r * 0.25, r * 0.1, e.x, e.y, r);
+    const grad = ctx.createRadialGradient(z.x - r * 0.25, z.y - r * 0.25, r * 0.1, z.x, z.y, r);
     grad.addColorStop(0, shadeColor(base, 1.08));
     grad.addColorStop(0.55, base);
     grad.addColorStop(1, shadeColor(base, 0.72));
     ctx.beginPath();
-    ctx.ellipse(e.x, e.y, r, r * (0.55 + Math.abs(Math.sin(e.tiltX ?? 0)) * 0.35), e.rotZ, 0, Math.PI * 2);
+    ctx.ellipse(z.x, z.y, r, r * (0.55 + Math.abs(Math.sin(e.tiltX ?? 0)) * 0.35), e.rotZ, 0, Math.PI * 2);
     ctx.fillStyle = grad;
     ctx.globalAlpha = 0.72;
     ctx.fill();
@@ -238,8 +277,9 @@ function drawGlassDiscsPopArt(scene, ctx) {
 
 /** @param {object} scene @param {CanvasRenderingContext2D} ctx */
 function drawOrigamiPopArt(scene, ctx) {
-  const { shapes, width, height, palette, colorOffset, variation } = scene;
+  const { shapes, width, height, palette, colorOffset } = scene;
   const showEdges = true;
+  const zoom = sceneCameraZoom(scene);
   const sorted = [...shapes].sort((a, b) => projectDepth(a.z, a.rotY) - projectDepth(b.z, b.rotY));
 
   for (const e of sorted) {
@@ -255,10 +295,160 @@ function drawOrigamiPopArt(scene, ctx) {
     const creaseRoll = d.crease === 'y' ? fold * 1.35 : 0;
     const rot = [e.rotX + creaseTilt, e.rotY, e.rotZ + creaseRoll];
     const baseFill = entityColor(palette, e.colorIdx, colorOffset);
-    const drawables = meshDrawables(mesh, rot, offset, width, height, baseFill, showEdges);
+    const drawables = meshDrawables(mesh, rot, offset, width, height, baseFill, showEdges, zoom);
     drawProjectedFaces(ctx, drawables, showEdges);
   }
   return true;
+}
+
+/** @param {object} scene @param {CanvasRenderingContext2D} ctx */
+function drawLiquidsPopArt(scene, ctx) {
+  const sim = scene._conceptState?.sim;
+  if (!sim) return false;
+  const relief = scene.variation.liquidRelief ?? 45;
+  const img = sim.toImageData(relief);
+  if (!img) return false;
+
+  if (!scene._liquidCanvas) {
+    scene._liquidCanvas = document.createElement('canvas');
+  }
+  const layer = scene._liquidCanvas;
+  if (layer.width !== sim.gridW || layer.height !== sim.gridH) {
+    layer.width = sim.gridW;
+    layer.height = sim.gridH;
+  }
+  layer.getContext('2d').putImageData(img, 0, 0);
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.drawImage(layer, 0, 0, scene.width, scene.height);
+  ctx.restore();
+  return true;
+}
+
+/** @param {CanvasRenderingContext2D} ctx @param {{x:number,y:number}[]} points @param {string} color @param {number} lineWidth */
+function strokeLivingRiver(ctx, points, color, lineWidth) {
+  if (points.length < 2) return;
+
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.globalAlpha = 1;
+  ctx.stroke();
+}
+
+/** @param {CanvasRenderingContext2D} ctx @param {{x:number,y:number}[]} points @param {string} color @param {number} baseWidth @param {number} widthScale */
+function drawLivingRiver(ctx, points, color, baseWidth, widthScale) {
+  if (points.length < 2) return;
+
+  const lineWidth = baseWidth * widthScale;
+  const capRadius = lineWidth * 0.5;
+
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+
+  strokeLivingRiver(ctx, points, color, lineWidth);
+  const tip = points[points.length - 1];
+  ctx.beginPath();
+  ctx.arc(tip.x, tip.y, capRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** @param {object} scene @param {CanvasRenderingContext2D} ctx */
+function drawVisualLivingSongPopArt(scene, ctx) {
+  const state = scene._conceptState ?? { beatPulse: 0, rivers: [], songTime: 0, songDuration: 0, animationSpeed: 1 };
+  const pulse = state.beatPulse ?? 0;
+  const slowPulse = state.slowWidthPulse ?? 0.5;
+  const energy = state.smoothEnergy ?? 0;
+  const songTime = state.songTime ?? 0;
+  const songDuration = state.songDuration ?? 0;
+  const animationSpeed = state.animationSpeed ?? scene.variation?.animationSpeed ?? 1;
+  const { width, height, palette } = scene;
+  const motionScale = livingMotionScale(scene.variation);
+  const motionParams = livingSongMotionParams(scene.variation, state);
+  const rivers = resolveLivingRiverCount(scene, state);
+  const baseWidth = Math.max(6, width * 0.0066);
+  const unicolor = !!scene.variation?.elementUnicolor;
+  const objectCount = resolveLivingElementCount(scene.variation, palette.length);
+  const laneCount = unicolor ? 1 : Math.max(1, palette.length);
+
+  for (let objectIdx = 0; objectIdx < objectCount; objectIdx++) {
+    const baseRiver = rivers[objectIdx] ?? rivers[0];
+    const sizeMul = elementSizeMultiplier(scene.variation, objectIdx, objectCount);
+
+    for (let lane = 0; lane < laneCount; lane++) {
+      const river = livingSnakeLaneRiver(baseRiver, objectIdx, lane, unicolor);
+      const colorIdx = unicolor ? (baseRiver.colorIdx ?? objectIdx) : lane;
+      const color = livingSnakeColor(palette, colorIdx, 0);
+      const progress = livingSongRiverProgress(songTime, animationSpeed, songDuration, river);
+      if (!progress.started) continue;
+
+      const chains = livingSongRiverPaths(width, height, songTime, animationSpeed, songDuration, river);
+      chains.forEach((points, chainIdx) => {
+        if (points.length < 2) return;
+        const segProgress = chainIdx < chains.length - 1 ? 1 : progress.localProgress;
+        const widthScale = livingSongWidthScale(
+          river,
+          songTime,
+          songDuration,
+          pulse,
+          slowPulse,
+          energy,
+          segProgress,
+          motionScale,
+        ) * sizeMul;
+        const wobbled = wobbleLivingSongPath2d(points, motionParams);
+        drawLivingRiver(ctx, wobbled, color, baseWidth, widthScale);
+      });
+    }
+  }
+  return true;
+}
+
+/** @param {CanvasRenderingContext2D} ctx @param {number} width @param {number} height @param {number} letterboxPct 0–100 */
+function drawLetterboxOverlay(ctx, width, height, letterboxPct) {
+  const bar = Math.round(height * (letterboxPct / 100) * 0.12);
+  if (bar < 1) return;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, width, bar);
+  ctx.fillRect(0, height - bar, width, bar);
+}
+
+/** @param {CanvasRenderingContext2D} ctx @param {number} width @param {number} height @param {number} vignettePct 0–100 */
+function drawVignetteOverlay(ctx, width, height, vignettePct) {
+  if (vignettePct <= 0) return;
+  const vig = vignettePct / 100;
+  const r = Math.min(width, height);
+  const gradient = ctx.createRadialGradient(
+    width / 2,
+    height / 2,
+    r * (0.32 - vig * 0.08),
+    width / 2,
+    height / 2,
+    r * (0.68 + vig * 0.32),
+  );
+  gradient.addColorStop(0, 'rgba(0,0,0,0)');
+  gradient.addColorStop(1, `rgba(0,0,0,${0.4 + vig * 0.58})`);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+}
+
+/** Letterbox + vignette frame overlays (0–100 each). @param {object} scene @param {CanvasRenderingContext2D} ctx */
+export function drawLivingSongOverlays(scene, ctx) {
+  const s = scene.cinematicSettings ?? {};
+  const { width, height } = scene;
+  drawVignetteOverlay(ctx, width, height, s.vignette ?? 0);
+  drawLetterboxOverlay(ctx, width, height, s.letterbox ?? 0);
 }
 
 // --- Cinematic ---
@@ -279,6 +469,13 @@ export function syncConceptCinematic(scene) {
       return syncGlassDiscsCinematic(scene);
     case 'origami':
       return syncOrigamiCinematic(scene);
+    case 'liquidsOnCanvas':
+      return syncLiquidsCinematic(scene);
+    case 'visualLivingSong':
+    case 'visualLivingSong3d':
+    case 'visualLivingSongSnake':
+    case 'visualLivingSongGlobe':
+      return syncVisualLivingSongCinematic(scene);
     default:
       return false;
   }
@@ -491,6 +688,82 @@ function syncGlassDiscsCinematic(scene) {
   return true;
 }
 
+function updateLiquidMeshFromSim(scene) {
+  const sim = scene._conceptState?.sim;
+  const mesh = scene._conceptState?.mesh;
+  if (!sim || !mesh?.geometry) return;
+
+  const relief = (scene.variation.liquidRelief ?? 45) / 100;
+  const maxDisp = 0.25 + relief * 1.15;
+  const positions = mesh.geometry.attributes.position;
+  const colors = mesh.geometry.attributes.color;
+  const w = sim.gridW;
+  const h = sim.gridH;
+
+  for (let y = 0; y < h; y++) {
+    const iy = h - 1 - y;
+    for (let x = 0; x < w; x++) {
+      const simIdx = y * w + x;
+      const vi = iy * w + x;
+      const ht = sim.height[simIdx];
+      positions.setZ(vi, ht * maxDisp);
+      const boost = ht > 0.02 ? 0.35 + Math.min(1, ht) * 0.65 : 0;
+      colors.setXYZ(
+        vi,
+        sim.r[simIdx] * boost,
+        sim.g[simIdx] * boost,
+        sim.b[simIdx] * boost,
+      );
+    }
+  }
+
+  positions.needsUpdate = true;
+  colors.needsUpdate = true;
+  mesh.geometry.computeVertexNormals();
+}
+
+/** @param {object} scene */
+function syncLiquidsCinematic(scene) {
+  clearConceptObjects(scene);
+  scene._conceptObjects = [];
+  scene._meshByShape = new Map();
+
+  const sim = scene._conceptState?.sim;
+  if (!sim) return false;
+
+  const planeW = scene.width * MESH_UNIT * 0.95;
+  const planeH = scene.height * MESH_UNIT * 0.95;
+  const geo = new THREE.PlaneGeometry(planeW, planeH, sim.gridW - 1, sim.gridH - 1);
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(geo.attributes.position.count * 3, 3));
+
+  const s = scene.cinematicSettings ?? {};
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: Math.max(0.35, (s.roughness ?? 16) / 100 * 0.9),
+    metalness: (s.metalness ?? 18) / 100 * 0.25,
+    emissive: new THREE.Color(0.15, 0.06, 0.02),
+    emissiveIntensity: 0.35 + (scene.variation.liquidRelief ?? 45) / 200,
+    side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -0.12;
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  scene._shapeRoot.add(mesh);
+  scene._conceptObjects.push(mesh);
+  scene._conceptState.mesh = mesh;
+  updateLiquidMeshFromSim(scene);
+  return true;
+}
+
+/** @param {object} scene */
+function syncVisualLivingSongCinematic(scene) {
+  clearConceptObjects(scene);
+  scene._conceptObjects = [];
+  scene._meshByShape = new Map();
+  return true;
+}
+
 /** @param {object} scene */
 function syncOrigamiCinematic(scene) {
   clearConceptObjects(scene);
@@ -518,6 +791,11 @@ function syncOrigamiCinematic(scene) {
 /** @param {object} scene */
 export function applyConceptTransforms(scene) {
   const concept = scene.variation.visualConcept ?? 'geometric';
+  if (concept === 'liquidsOnCanvas') {
+    updateLiquidMeshFromSim(scene);
+    return;
+  }
+  if (concept === 'visualLivingSong' || concept === 'visualLivingSong3d' || concept === 'visualLivingSongSnake' || concept === 'visualLivingSongGlobe') return;
   const mot = scene.damped?.motion ?? 0;
   const geo = scene.damped?.geometry ?? 0;
 
@@ -602,7 +880,9 @@ export function applyConceptTransforms(scene) {
 /** @param {object} scene */
 export function updateConceptMeshColors(scene) {
   const concept = scene.variation.visualConcept ?? 'geometric';
-  if (concept === 'geometric') return false;
+  if (concept === 'geometric' || concept === 'liquidsOnCanvas' || concept === 'visualLivingSong' || concept === 'visualLivingSong3d' || concept === 'visualLivingSongSnake' || concept === 'visualLivingSongGlobe') {
+    return concept === 'liquidsOnCanvas';
+  }
   const opts = materialOpts(scene);
   const snap = opts.trueColors && scene.variation.colorMode === 'manual';
 

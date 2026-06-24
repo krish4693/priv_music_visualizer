@@ -12,7 +12,7 @@ export function initTypography(ctx) {
   const chars = charsForTypography(songTitle, count);
 
   const entities = positions.map((pos, i) => {
-    const e = createBaseEntity(pos, i, variation, rng, palette.length);
+    const e = createBaseEntity(pos, i, variation, rng, palette.length, count);
     const ch = chars[i];
     const mesh = buildCharMeshData(ch);
     e.rotSpeedX = spreadSpinAxis(rng, 0.55, 0.45, variation.speedSpread / 100);

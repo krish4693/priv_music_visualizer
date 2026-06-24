@@ -1,7 +1,10 @@
 import { createAudioSourceState, extractAudioSources, resetAudioSourceState } from '../audio/sources.js';
 import { resolveMappedValues, DEFAULT_MAPPINGS, VISUAL_TARGETS } from './mappingMatrix.js';
 import { DEFAULT_VARIATION } from './variationStore.js';
+import { elementMotionScale, elementTurnScale, element3dScale, elementSizeMultiplier } from './elementMotion.js';
+import { elementDistanceRange, applyShapeBalloonSeparation } from './elementBalloonPhysics.js';
 import { DEFAULT_BG } from './backgroundStore.js';
+import { loadCinematicSettings, normalizeCinematicSettings } from './cinematicSettingsStore.js';
 import { SHAPE_PRESETS, getShapeKind } from './shapePresets.js';
 import { CHARCOAL_BG, popArtColor, POP_ART_ALPHA, POP_ART_COLORS } from './popArtPalette.js';
 import { TitleLetters3D } from './titleText3d.js';
@@ -13,6 +16,7 @@ import {
   shadeFactor,
   flatMeshForPreset,
 } from './math3d.js';
+import { zoomProjectedPoints } from './sceneCore/drawHelpers.js';
 import { spreadSpinAxis, spreadDriftAxis } from './motionSpread.js';
 import { initSoftShapeMotion, updateSoftShapeMotion, syncSoftShapeMotionKind } from './roundShapeMotion.js';
 import {
@@ -21,11 +25,17 @@ import {
   updateConceptExtras,
   drawConceptScene,
   isGeometricConcept,
+  resetLivingSongState,
 } from './concepts/index.js';
+import { isCanvasFluidConcept, isLivingSongConcept } from './visualConceptStore.js';
+import { drawLivingSongSpaceBackground } from './sceneCore/spaceBackground.js';
+import { drawLivingSongOverlays } from './concepts/conceptRenderers.js';
+import { resetLiquidSim } from './concepts/liquidsOnCanvasConcept.js';
+import { applyViewZoom } from './viewZoom.js';
 
 const WIDTH = 1280;
 const HEIGHT = 720;
-const MIN_SHAPES = 8;
+const MIN_SHAPES = 1;
 const MAX_SHAPES = 28;
 
 function lerp(a, b, t) {
@@ -99,6 +109,7 @@ export class PopArtScene {
     this._beatFlash = 0;
     this.shapes = [];
     this.songTitle = '';
+    this.songDuration = 0;
     this.titleFrequency = DEFAULT_TITLE_FREQUENCY;
     this.titleLetters = new TitleLetters3D();
     this.titleColorIdx = 0;
@@ -115,6 +126,15 @@ export class PopArtScene {
     this._surpriseTimer = 0;
     this.liveAnalysis = null;
     this._automationSample = null;
+    this.cinematicSettings = normalizeCinematicSettings(loadCinematicSettings());
+  }
+
+  _cameraZoom() {
+    return this.cinematicSettings?.cameraZoom ?? 50;
+  }
+
+  setCinematicSettings(settings) {
+    this.cinematicSettings = normalizeCinematicSettings(settings);
   }
 
   setAutomationSample(sample) {
@@ -183,6 +203,10 @@ export class PopArtScene {
     }
   }
 
+  setSongDuration(seconds) {
+    this.songDuration = Math.max(0, seconds || 0);
+  }
+
   setTitleFrequency(freq) {
     this.titleFrequency = Math.min(100, Math.max(0, freq));
   }
@@ -198,9 +222,20 @@ export class PopArtScene {
 
   setPalette(palette) {
     this.palette = palette?.length ? palette.map((c) => ({ ...c })) : [...POP_ART_COLORS];
-    const n = this.palette.length;
-    for (let i = 0; i < this.shapes.length; i++) {
-      this.shapes[i].colorIdx = i % n;
+    if (isCanvasFluidConcept(getActiveConceptId(this.variation)) && this._conceptState?.sim) {
+      resetLiquidSim(
+        this._conceptState.sim,
+        this.palette,
+        this.rng,
+        this.variation.liquidSourceMode,
+      );
+    } else if (isLivingSongConcept(getActiveConceptId(this.variation)) && this._conceptState) {
+      resetLivingSongState(this.variation, this._conceptState, this.rng, this.palette.length);
+    } else {
+      const n = this.palette.length;
+      for (let i = 0; i < this.shapes.length; i++) {
+        this.shapes[i].colorIdx = i % n;
+      }
     }
     this._rebuildTitleLetters();
   }
@@ -246,11 +281,15 @@ export class PopArtScene {
   }
 
   /** Rebuild scene with current variation (e.g. after seed or shape change). */
-  resetPlayhead() {
+  resetPlayhead(options = {}) {
+    const resetConcept = options.resetConcept !== false;
     this._prevFrameTime = null;
     this._titleClock = 0;
     resetAudioSourceState(this.sourceState);
     this.damped = { geometry: 0, color: 0, motion: 0, morphing: 0 };
+    if (resetConcept && isLivingSongConcept(getActiveConceptId(this.variation)) && this._conceptState) {
+      resetLivingSongState(this.variation, this._conceptState, this.rng, this.palette.length);
+    }
   }
 
   regenerate() {
@@ -325,11 +364,13 @@ export class PopArtScene {
   _initShapes(width, height) {
     const rng = this.rng;
     const count = Math.min(MAX_SHAPES, Math.max(MIN_SHAPES, this.variation.shapeCount));
-    const spread = this.variation.layoutSpread / 100;
-    const sizeSpread = this.variation.sizeSpread / 100;
+    const spread = (this.variation.layoutSpread / 100) * elementDistanceRange(this.variation, Math.min(width, height) * 0.5).orbitScale;
     const spin = this.variation.spinIntensity / 100;
     const speedSpread = (this.variation.speedSpread ?? DEFAULT_VARIATION.speedSpread) / 100;
     const depth = this.variation.depthRange / 100;
+    const turnMul = elementTurnScale(this.variation);
+    const dim3Mul = element3dScale(this.variation);
+    const motion = elementMotionScale(this.variation);
     const enabled = this._enabledShapeIds();
     const positions = curatedLayout(count, width, height, spread, rng);
 
@@ -338,9 +379,9 @@ export class PopArtScene {
       const preset = SHAPE_PRESETS[type];
       const morphTarget = this._pickNextType(type, rng);
       const target = SHAPE_PRESETS[morphTarget];
-      const sizeMul = 1 + (rng() - 0.5) * sizeSpread * 0.55;
-      const zRange = 80 + depth * 200;
-      const spinMul = 0.35 + spin * 0.85;
+      const sizeMul = elementSizeMultiplier(this.variation, i, count, rng);
+      const zRange = (80 + depth * 200) * dim3Mul * motion;
+      const spinMul = (0.35 + spin * 0.85) * turnMul * motion;
 
       const z = (rng() - 0.5) * zRange * 2;
 
@@ -395,7 +436,7 @@ export class PopArtScene {
     b.fillRect(0, 0, this.width, this.height);
 
     b.globalAlpha = 0.035;
-    for (let i = 0; i < 2800; i++) {
+    for (let i = 0; i < 600; i++) {
       const v = 22 + (i * 17 % 18);
       b.fillStyle = `rgb(${v}, ${v}, ${v + 2})`;
       b.fillRect((i * 73) % this.width, (i * 131) % this.height, 1, 1);
@@ -718,7 +759,9 @@ export class PopArtScene {
     const drag = 0.978 + visc * 0.018;
     const driftSpeed = 16 + (1 - visc) * 62 + mot * 78;
     const morphRate = 0.015 + morph * 0.07 + (1 - visc) * 0.018;
-    const spinMul = 0.35 + (this.variation.spinIntensity / 100) * 0.85;
+    const spinMul = (0.35 + (this.variation.spinIntensity / 100) * 0.85)
+      * elementTurnScale(this.variation)
+      * elementMotionScale(this.variation);
     const rotRate = (0.24 + mot * 0.72) * spinMul;
     const breathe = 1 + geo * 0.22;
     const zLimit = 180 + depth * 140;
@@ -769,8 +812,29 @@ export class PopArtScene {
       }
     }
 
+    if (this.shapes.length && isGeometricConcept(getActiveConceptId(this.variation))) {
+      applyShapeBalloonSeparation(
+        this.shapes,
+        this.variation,
+        elementMotionScale(this.variation) * mot,
+        motionDt,
+        this.width,
+        this.height,
+      );
+    }
+
     if (useConcept) {
-      updateConceptExtras(this, { mot, geo, morph, motionDt, beat: frame.beat });
+      updateConceptExtras(this, {
+        mot,
+        geo,
+        morph,
+        motionDt,
+        beat: frame.beat,
+        sources,
+        songTime: frame.time ?? 0,
+        tempo: frame.tempo ?? 0.5,
+        songDuration: this.songDuration ?? 0,
+      });
     }
 
     this._updateTitle(frame, motionDt);
@@ -836,9 +900,9 @@ export class PopArtScene {
     const params = this._shapeRenderParams(s);
     const mesh = this._meshForShape(params);
     const offset = [
-      s.x - w / 2 + (s.wobbleX ?? 0),
-      s.y - h / 2 + (s.wobbleY ?? 0),
-      s.z + (s.wobbleZ ?? 0),
+      s.x - w / 2 + (s.wobbleX ?? 0) + (s.balloonX ?? 0),
+      s.y - h / 2 + (s.wobbleY ?? 0) + (s.balloonY ?? 0),
+      s.z + (s.wobbleZ ?? 0) + (s.balloonZ ?? 0),
     ];
     const rot = [s.rotX + (s.tiltX ?? 0), s.rotY, s.rotZ + (s.tiltZ ?? 0)];
     const colorIdx = this._effectiveColorIdx(s);
@@ -852,7 +916,12 @@ export class PopArtScene {
       const viewNormal = rotateNormal(face.normal, rot);
       if (viewNormal[2] <= 0.05) continue;
 
-      const projected = worldVerts.map((v) => projectPoint(v, w, h));
+      const projected = zoomProjectedPoints(
+        worldVerts.map((v) => projectPoint(v, w, h)),
+        w,
+        h,
+        this._cameraZoom(),
+      );
       const avgZ = projected.reduce((acc, p) => acc + p.z, 0) / projected.length;
       const shade = shadeFactor(viewNormal);
       const fill = shadeColor(baseFill, shade);
@@ -878,13 +947,13 @@ export class PopArtScene {
     return this._shapeLayer;
   }
 
-  _drawShapeLayer(lc, s, shapeIndex) {
+  _drawShapeLayer(lc, s, shapeIndex, clearLayer = true) {
+    if (clearLayer) lc.clearRect(0, 0, this.width, this.height);
+
     const shapeParams = this._shapeRenderParams(s);
     const drawables = this._collectShapeDrawables(s);
     const titleOnShape = shapeIndex === this.title.shapeIndex && this.title.opacity > 0.01;
     const letterDrawables = titleOnShape ? this._collectTitleDrawables(s, shapeParams) : { solids: [] };
-
-    lc.clearRect(0, 0, this.width, this.height);
 
     for (const d of drawables) {
       const pts = d.projected;
@@ -926,11 +995,17 @@ export class PopArtScene {
     this._ensureBackground();
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(this._bgCanvas, 0, 0);
 
-    if (!isGeometricConcept(getActiveConceptId(this.variation))) {
+    if (isLivingSongConcept(getActiveConceptId(this.variation))) {
+      drawLivingSongSpaceBackground(this, ctx);
       drawConceptScene(this, ctx);
+      drawLivingSongOverlays(this, ctx);
     } else {
+      ctx.drawImage(this._bgCanvas, 0, 0);
+
+      if (!isGeometricConcept(getActiveConceptId(this.variation))) {
+        drawConceptScene(this, ctx);
+      } else {
       const layer = this._ensureShapeLayer();
       const lc = layer.getContext('2d');
       lc.globalAlpha = 1;
@@ -940,9 +1015,11 @@ export class PopArtScene {
         .map((s, i) => ({ s, i, depth: this._shapeDepth(s) }))
         .sort((a, b) => a.depth - b.depth);
 
+      lc.clearRect(0, 0, this.width, this.height);
       for (const { s, i } of sortedEntries) {
-        this._drawShapeLayer(lc, s, i);
-        ctx.drawImage(layer, 0, 0);
+        this._drawShapeLayer(lc, s, i, false);
+      }
+      ctx.drawImage(layer, 0, 0);
       }
     }
 

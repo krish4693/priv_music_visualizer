@@ -4,156 +4,157 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Music Parameter Visualizer</title>
-    <link rel="preload" href="/samples/aboud-vs-flab.wav" as="fetch" crossorigin="anonymous" />
+    <link rel="preload" href="/samples/the-blue-monk.mp3" as="fetch" crossorigin="anonymous" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <div class="app">
       <header class="app-header">
         <h1>Music Parameter Visualizer</h1>
+        <button type="button" class="help-open-btn" id="help-open-btn" aria-expanded="false" aria-controls="help-dialog">Help</button>
       </header>
 
+      <div class="help-dialog" id="help-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="help-dialog-title">
+        <div class="help-backdrop" tabindex="-1"></div>
+        <div class="help-panel panel-inner">
+          <header class="help-panel-header">
+            <h2 id="help-dialog-title">Parameter guide</h2>
+            <button type="button" class="help-close-btn" id="help-close-btn" aria-label="Close help">×</button>
+          </header>
+          <p class="help-intro">What each control does. Use <strong>Check controls</strong> to verify wiring — this does not judge visual quality, only whether UI elements exist and update app state.</p>
+          <div class="help-actions">
+            <button type="button" class="help-audit-btn" id="help-audit-btn">Check controls</button>
+          </div>
+          <div class="help-audit-results" id="help-audit-results" hidden></div>
+          <div class="help-content" id="help-content"></div>
+        </div>
+      </div>
+
       <div class="studio">
-        <!-- TOP: shapes, audio, colors -->
+        <!-- TOP: scene settings, session/color, export -->
         <aside class="panel panel-top">
-          <section class="shapes-bar panel-inner shapes-bar-compact">
-            <div class="shapes-bar-toolbar">
-              <span class="variation-group-label shapes-bar-label">Visual concept</span>
-              <select id="visual-concept-select" class="visual-concept-select" aria-label="Visual concept"></select>
-              <span class="variation-group-label shapes-bar-label shapes-bar-label-secondary" id="shape-types-label">Shape types</span>
-              <label class="dropzone-mini" id="dropzone" for="file-input">
-                <input type="file" id="file-input" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,.mp3,.wav" hidden />
-                <span class="dropzone-icon">♫</span>
-                <span class="dropzone-text">MP3 / WAV</span>
-              </label>
-              <p class="file-name file-name-inline" id="file-name">No audio loaded</p>
-              <div class="config-toolbar">
-                <button type="button" class="config-save-btn" id="save-config-btn">Save config</button>
-                <button type="button" class="config-open-btn" id="open-config-btn">Open config</button>
-                <input type="file" id="open-config-input" accept=".mviz.json,.json,.vtake" hidden aria-hidden="true" />
-                <span class="config-status" id="config-status" hidden></span>
-              </div>
-            </div>
-            <div class="shapes-bar-body">
-              <div class="shape-toggles shape-toggles-always" id="shape-toggles"></div>
-              <div class="palette-in-shapes" id="palette-row">
-                <span class="palette-label">Colors</span>
-                <div class="palette-swatches" id="palette-swatches"></div>
-                <div class="palette-actions palette-actions-inline">
-                  <div class="palette-add">
-                    <input type="color" id="color-picker" value="#00dcff" aria-label="Pick a custom color" />
-                    <button type="button" id="add-color-btn">Add</button>
-                  </div>
-                  <label class="bg-color-label bg-color-inline">
-                    <span>BG</span>
-                    <input type="color" id="bg-color-picker" value="#1c1c1e" aria-label="Background color" />
+          <div class="top-deck">
+            <section class="top-card top-card-visual panel-inner">
+              <header class="top-card-header">
+                <span class="top-card-title">Scene settings</span>
+                <span class="top-card-hint">Concept &amp; shape controls</span>
+              </header>
+              <div class="top-card-body">
+                <label class="top-field">
+                  <span class="top-field-label">Visual concept</span>
+                  <select id="visual-concept-select" class="visual-concept-select top-field-control" aria-label="Visual concept"></select>
+                </label>
+                <div class="globe-toolbar-group top-field-stack" id="globe-controls-group" hidden>
+                  <label class="top-field">
+                    <span class="top-field-label" id="globe-shape-label">Globe shape</span>
+                    <select id="globe-shape-select" class="visual-concept-select top-field-control" aria-label="Globe shape"></select>
+                  </label>
+                  <label class="top-field top-field-slider">
+                    <span class="top-field-label">Detail</span>
+                    <div class="top-slider-row">
+                      <input type="range" id="globe-detail-slider" min="0" max="100" step="1" aria-label="Globe line detail" />
+                      <span class="globe-detail-val" id="globe-detail-val">50%</span>
+                    </div>
+                    <span class="variation-hint variation-hint-inline">Line density on each blob — raise for more visible tubes.</span>
+                  </label>
+                  <label class="top-field">
+                    <span class="top-field-label">Line profile</span>
+                    <select id="globe-tube-profile-select" class="visual-concept-select top-field-control" aria-label="Globe line profile"></select>
                   </label>
                 </div>
-              </div>
-            </div>
-            <div class="progress-wrap progress-wrap-inline" id="upload-progress-wrap" hidden>
-              <div class="progress-bar progress-bar-inline">
-                <div class="progress-fill upload-fill" id="upload-progress-fill"></div>
-              </div>
-              <span class="progress-label progress-label-inline" id="upload-progress-label">Reading file…</span>
-              <span class="progress-percent progress-percent-inline" id="upload-progress-percent">0%</span>
-            </div>
-          </section>
-        </aside>
-
-        <!-- LEFT: mapping -->
-        <aside class="panel panel-left">
-          <section class="mapping-section panel-inner" id="mapping-section">
-            <div class="mapping-header">
-              <span class="mapping-title">Parameter mapping</span>
-              <span class="mapping-hint">Audio → visual properties</span>
-            </div>
-            <div class="mapping-table-wrap">
-              <table class="mapping-table" id="mapping-table">
-                <thead>
-                  <tr>
-                    <th>Property</th>
-                    <th>Source</th>
-                    <th>Sens.</th>
-                    <th>In use</th>
-                  </tr>
-                </thead>
-                <tbody id="mapping-body"></tbody>
-              </table>
-            </div>
-            <div class="audio-sources-panel" id="audio-sources-panel">
-              <span class="audio-sources-title">Song analysis (live)</span>
-              <ul class="audio-sources-list" id="audio-sources-list"></ul>
-            </div>
-            <div class="mapping-controls">
-              <label class="viscosity-control">
-                <span class="viscosity-label">Global viscosity</span>
-                <div class="viscosity-row">
-                  <input type="range" id="viscosity-slider" min="0" max="100" step="1" value="38" aria-label="Global viscosity" />
-                  <span class="viscosity-val" id="viscosity-val">38%</span>
+                <div class="top-field top-field-shapes" id="shape-types-block">
+                  <span class="top-field-label" id="shape-types-label">Shape types</span>
+                  <div class="shape-toggles shape-toggles-always" id="shape-toggles"></div>
                 </div>
-              </label>
-            </div>
-            <button type="button" class="mapping-reset" id="mapping-reset">Reset mapping</button>
-          </section>
+              </div>
+            </section>
+
+            <section class="top-card top-card-session panel-inner">
+              <header class="top-card-header">
+                <span class="top-card-title">Session &amp; color</span>
+                <span class="top-card-hint">Audio, configs &amp; palette</span>
+              </header>
+              <div class="top-card-body">
+                <div class="session-block session-audio">
+                  <span class="top-field-label">Active audio</span>
+                  <div class="session-audio-row">
+                    <label class="dropzone-mini" id="dropzone" for="file-input">
+                      <input type="file" id="file-input" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,.mp3,.wav" hidden />
+                      <span class="dropzone-icon">♫</span>
+                      <span class="dropzone-text">MP3 / WAV</span>
+                    </label>
+                    <p class="file-name file-name-card" id="file-name">No audio loaded</p>
+                  </div>
+                  <div class="progress-wrap progress-wrap-inline" id="upload-progress-wrap" hidden>
+                    <div class="progress-bar progress-bar-inline">
+                      <div class="progress-fill upload-fill" id="upload-progress-fill"></div>
+                    </div>
+                    <span class="progress-label progress-label-inline" id="upload-progress-label">Reading file…</span>
+                    <span class="progress-percent progress-percent-inline" id="upload-progress-percent">0%</span>
+                  </div>
+                </div>
+                <div class="session-block session-config">
+                  <span class="top-field-label">Session configs</span>
+                  <div class="config-toolbar config-toolbar-card">
+                    <button type="button" class="config-save-btn" id="save-config-btn" title="Save full session as .mviz.json (look, colors, audio ref, export clip, automation)">Save config</button>
+                    <button type="button" class="config-open-btn" id="open-config-btn" title="Restore a saved .mviz.json session">Open config</button>
+                    <input type="file" id="open-config-input" accept=".mviz.json,.json,.vtake" hidden aria-hidden="true" />
+                  </div>
+                  <span class="config-status" id="config-status" hidden></span>
+                </div>
+                <div class="session-block session-palette" id="palette-row">
+                  <span class="top-field-label">Visualization palette</span>
+                  <div class="palette-swatches palette-swatches-card" id="palette-swatches"></div>
+                  <div class="palette-actions palette-actions-card">
+                    <div class="palette-add">
+                      <input type="color" id="color-picker" value="#00dcff" aria-label="Pick a custom color" />
+                      <button type="button" id="add-color-btn">Add</button>
+                    </div>
+                    <label class="bg-color-label bg-color-card">
+                      <span>BG</span>
+                      <input type="color" id="bg-color-picker" value="#1c1c1e" aria-label="Background color" />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="top-card top-card-export panel-inner">
+              <header class="top-card-header">
+                <span class="top-card-title">Export</span>
+                <span class="top-card-hint">Clip range &amp; MP4 output</span>
+              </header>
+              <div class="export-deck">
+                <div class="clip-export-row">
+                  <label class="clip-time-field">
+                    <span>From</span>
+                    <input type="number" id="clip-from" min="0" step="0.1" value="0" disabled aria-label="Clip start time in seconds" />
+                  </label>
+                  <label class="clip-time-field">
+                    <span>To</span>
+                    <input type="number" id="clip-to" min="0" step="0.1" value="10.8" disabled aria-label="Clip end time in seconds" />
+                  </label>
+                  <button type="button" id="preview-export-btn" disabled title="Fast MP4 preview of selected time range">Preview clip</button>
+                  <label class="export-audio-toggle shape-toggle" id="export-audio-toggle">
+                    <input type="checkbox" id="export-audio-check" checked aria-label="Include audio in MP4 export" />
+                    <span>Include audio</span>
+                  </label>
+                  <button id="export-btn" disabled>Export full MP4</button>
+                </div>
+                <div class="progress-wrap export-progress-wrap" id="create-progress-wrap" hidden>
+                  <div class="progress-bar progress-bar-inline">
+                    <div class="progress-fill create-fill" id="create-progress-fill"></div>
+                  </div>
+                  <span class="progress-label progress-label-inline" id="create-progress-label">Preparing…</span>
+                  <span class="progress-percent progress-percent-inline" id="create-progress-percent">0%</span>
+                </div>
+              </div>
+            </section>
+          </div>
         </aside>
 
-        <!-- CENTER: video -->
-        <main class="panel panel-center">
-          <section class="canvas-section">
-            <div class="renderer-mode-row">
-              <label class="renderer-mode-label" for="renderer-mode-select">Renderer</label>
-              <select id="renderer-mode-select" aria-label="Visualization renderer">
-                <option value="popart">Pop Art (Classic)</option>
-                <option value="cinematic">Cinematic (WebGL)</option>
-              </select>
-            </div>
-            <div class="canvas-frame">
-              <canvas id="visualizer" width="1280" height="720"></canvas>
-            </div>
-            <div class="transport">
-              <button id="play-btn" disabled>Play</button>
-              <button id="stop-btn" disabled>Stop</button>
-              <label class="playhead-wrap">
-                <span class="sr-only">Timeline</span>
-                <input type="range" id="playhead-slider" min="0" max="0" step="0.01" value="0" disabled aria-label="Timeline playhead" />
-              </label>
-              <button id="record-btn" disabled title="Record parameter changes while playing">Record</button>
-              <button type="button" id="clear-automation-btn" disabled title="Delete recording">Clear</button>
-              <span class="automation-status" id="automation-status"></span>
-              <div class="speed-control" id="speed-control" role="group" aria-label="Motion speed"></div>
-              <span id="time-display">0:00 / 0:00</span>
-            </div>
-            <p class="take-note">Record while playing · save everything with <strong>Save config</strong></p>
-          </section>
-        </main>
-
-        <!-- RIGHT: variation -->
-        <aside class="panel panel-right">
-          <section class="cinematic-section panel-inner" id="cinematic-section" hidden>
-            <div class="variation-header">
-              <span class="variation-title">Cinematic look</span>
-              <span class="variation-hint">Fog, light, bloom &amp; shade</span>
-            </div>
-            <div class="cinematic-grid" id="cinematic-sliders"></div>
-            <div class="cinematic-toggles">
-              <label class="cinematic-toggle shape-toggle active" id="cinematic-floor-toggle">
-                <input type="checkbox" id="cinematic-floor-check" checked aria-label="Show ground floor" />
-                <span>Ground floor</span>
-              </label>
-              <label class="cinematic-toggle shape-toggle active" id="cinematic-shadows-toggle">
-                <input type="checkbox" id="cinematic-shadows-check" checked aria-label="Cast shadows" />
-                <span>Cast shadows</span>
-              </label>
-              <label class="cinematic-toggle shape-toggle" id="cinematic-true-colors-toggle">
-                <input type="checkbox" id="cinematic-true-colors-check" aria-label="Match palette swatch colors" />
-                <span>True swatch colors</span>
-              </label>
-            </div>
-            <p class="variation-hint cinematic-floor-hint">True swatch colors off = original lit cinematic look. On = colors match palette squares more closely.</p>
-            <button type="button" class="variation-reset" id="cinematic-reset-btn">Reset cinematic</button>
-          </section>
-
+        <!-- LEFT: clip variation -->
+        <aside class="panel panel-left">
           <section class="variation-section panel-inner" id="variation-section">
             <div class="variation-header">
               <span class="variation-title">Clip variation</span>
@@ -196,12 +197,53 @@
                   <span class="variation-val" id="color-shift-val">65%</span>
                 </div>
               </label>
-              <label class="variation-field">
+              <label class="variation-field" id="shape-count-field">
                 <span class="variation-field-label">Shape count</span>
                 <div class="variation-slider-row">
-                  <input type="range" id="shape-count-slider" min="8" max="28" step="1" aria-label="Number of shapes" />
-                  <span class="variation-val" id="shape-count-val">20</span>
+                  <input type="number" id="shape-count-input" class="variation-num-input" min="1" max="28" step="1" aria-label="Exact shape count" />
+                  <input type="range" id="shape-count-slider" min="1" max="28" step="1" aria-label="Number of shapes" />
+                  <span class="variation-val" id="shape-count-val">6</span>
                 </div>
+                <p class="variation-hint" id="shape-count-hint">Number of objects (e.g. separate spheres on Globe). With Unicolor off, each object gets one snake per active palette swatch.</p>
+              </label>
+              <label class="variation-field variation-field-full">
+                <label class="manual-speed-toggle">
+                  <input type="checkbox" id="element-unicolor-check" aria-label="Unicolor elements — one snake per object" />
+                  <span>Unicolor elements</span>
+                </label>
+                <p class="variation-hint">Off (default): each object uses one snake per selected palette color. On: one snake and one color per object. Shape count = number of objects (e.g. spheres).</p>
+              </label>
+              <label class="variation-field variation-field-full" id="element-size-field">
+                <span class="variation-field-label">Element size</span>
+                <div class="size-range-row">
+                  <label class="size-range-field">
+                    <span class="size-range-label">From</span>
+                    <input type="range" id="element-size-from-slider" min="0" max="100" step="1" aria-label="Smallest element size" />
+                    <span class="variation-val" id="element-size-from-val">45%</span>
+                  </label>
+                  <label class="size-range-field">
+                    <span class="size-range-label">To</span>
+                    <input type="range" id="element-size-to-slider" min="0" max="100" step="1" aria-label="Largest element size" />
+                    <span class="variation-val" id="element-size-to-val">100%</span>
+                  </label>
+                </div>
+                <p class="variation-hint">Smallest → largest element across shape count. Size spread randomizes inside this range.</p>
+              </label>
+              <label class="variation-field variation-field-full" id="element-distance-field">
+                <span class="variation-field-label">Element distance</span>
+                <div class="size-range-row">
+                  <label class="size-range-field">
+                    <span class="size-range-label">From</span>
+                    <input type="range" id="element-distance-from-slider" min="0" max="100" step="1" aria-label="Minimum element spacing" />
+                    <span class="variation-val" id="element-distance-from-val">42%</span>
+                  </label>
+                  <label class="size-range-field">
+                    <span class="size-range-label">To</span>
+                    <input type="range" id="element-distance-to-slider" min="0" max="100" step="1" aria-label="Maximum element spacing" />
+                    <span class="variation-val" id="element-distance-to-val">74%</span>
+                  </label>
+                </div>
+                <p class="variation-hint">Closest → widest spacing. Elements softly bump apart like balloons when they overlap.</p>
               </label>
               <label class="variation-field">
                 <span class="variation-field-label">Size spread</span>
@@ -246,6 +288,27 @@
                   <span class="variation-val" id="depth-range-val">45%</span>
                 </div>
               </label>
+              <label class="variation-field">
+                <span class="variation-field-label">Motion activity</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="element-motion-slider" min="0" max="100" step="1" aria-label="Element motion activity" />
+                  <span class="variation-val" id="element-motion-val">50%</span>
+                </div>
+              </label>
+              <label class="variation-field">
+                <span class="variation-field-label">Element turn</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="element-turn-slider" min="0" max="100" step="1" aria-label="Element rotation intensity" />
+                  <span class="variation-val" id="element-turn-val">50%</span>
+                </div>
+              </label>
+              <label class="variation-field">
+                <span class="variation-field-label">3D motion</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="element-3d-motion-slider" min="0" max="100" step="1" aria-label="Element movement in all dimensions" />
+                  <span class="variation-val" id="element-3d-motion-val">50%</span>
+                </div>
+              </label>
               <label class="variation-field variation-field-full">
                 <span class="variation-field-label">Motion speed</span>
                 <div class="speed-control speed-control-panel" id="speed-control-panel" role="group" aria-label="Motion speed"></div>
@@ -274,35 +337,197 @@
               </label>
             </div>
 
+            <div class="variation-group">
+              <span class="variation-group-label">Audio response</span>
+              <label class="variation-field">
+                <span class="variation-field-label">Global viscosity</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="viscosity-slider" min="0" max="100" step="1" value="38" aria-label="Global viscosity" />
+                  <span class="variation-val viscosity-val" id="viscosity-val">38%</span>
+                </div>
+                <p class="variation-hint">Higher = smoother, heavier motion. Lower = snappier reactions to the music.</p>
+              </label>
+            </div>
+
+            <div class="variation-group" id="liquid-controls-group" hidden>
+              <span class="variation-group-label" id="lava-controls-label">Volcano lava</span>
+              <p class="variation-hint variation-hint-block" id="lava-controls-hint">Palette colors erupt from the summit vent and flow downhill in thick streams.</p>
+              <label class="variation-field">
+                <span class="variation-field-label">Flow speed</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="liquid-flow-speed-slider" min="0" max="100" step="1" aria-label="Liquid flow speed" />
+                  <span class="variation-val" id="liquid-flow-speed-val">55%</span>
+                </div>
+              </label>
+              <label class="variation-field">
+                <span class="variation-field-label">Thickness</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="liquid-thickness-slider" min="0" max="100" step="1" aria-label="Liquid thickness and viscosity" />
+                  <span class="variation-val" id="liquid-thickness-val">50%</span>
+                </div>
+              </label>
+              <label class="variation-field">
+                <span class="variation-field-label">Relief / height</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="liquid-relief-slider" min="0" max="100" step="1" aria-label="Liquid relief height" />
+                  <span class="variation-val" id="liquid-relief-val">45%</span>
+                </div>
+              </label>
+              <label class="variation-field">
+                <span class="variation-field-label">Turbulence</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="liquid-turbulence-slider" min="0" max="100" step="1" aria-label="Liquid turbulence" />
+                  <span class="variation-val" id="liquid-turbulence-val">35%</span>
+                </div>
+              </label>
+            </div>
+
+            <div class="variation-group" id="living-song-controls-group" hidden>
+              <span class="variation-group-label">Living song</span>
+              <label class="variation-field">
+                <span class="variation-field-label">Surface wobble</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="surface-wobble-slider" min="0" max="100" step="1" aria-label="Surface wobble distortion" />
+                  <span class="variation-val" id="surface-wobble-val">0%</span>
+                </div>
+                <p class="variation-hint">Living Song concepts — noise displacement driven by BPM and bass.</p>
+              </label>
+              <label class="variation-field">
+                <span class="variation-field-label">Background depth</span>
+                <div class="variation-slider-row">
+                  <input type="range" id="background-depth-slider" min="0" max="100" step="1" aria-label="Starfield and space depth" />
+                  <span class="variation-val" id="background-depth-val">50%</span>
+                </div>
+                <p class="variation-hint">More stars, haze, and open space behind Living Song scenes.</p>
+              </label>
+            </div>
+
             <button type="button" class="variation-reset" id="variation-reset" title="Reset all variation sliders to defaults">Reset sliders</button>
           </section>
         </aside>
 
-        <!-- BOTTOM: export -->
-        <footer class="panel panel-bottom">
-          <section class="export-section panel-inner">
-            <div class="clip-export-row">
-              <label class="clip-time-field">
-                <span>From</span>
-                <input type="number" id="clip-from" min="0" step="0.1" value="0" disabled aria-label="Clip start time in seconds" />
-              </label>
-              <label class="clip-time-field">
-                <span>To</span>
-                <input type="number" id="clip-to" min="0" step="0.1" value="0" disabled aria-label="Clip end time in seconds" />
-              </label>
-              <button type="button" id="preview-export-btn" disabled title="Fast MP4 preview of selected time range">Preview clip</button>
+        <!-- CENTER: video -->
+        <main class="panel panel-center">
+          <section class="canvas-section">
+            <div class="renderer-mode-row">
+              <label class="renderer-mode-label" for="renderer-mode-select">Renderer</label>
+              <select id="renderer-mode-select" aria-label="Visualization renderer">
+                <option value="popart">Pop Art (Classic)</option>
+                <option value="cinematic">Cinematic (WebGL)</option>
+              </select>
             </div>
-            <button id="export-btn" disabled>Export full MP4</button>
-            <div class="progress-wrap" id="create-progress-wrap" hidden>
-              <p class="progress-heading">Video creation</p>
-              <div class="progress-bar">
-                <div class="progress-fill create-fill" id="create-progress-fill"></div>
-              </div>
-              <p class="progress-label" id="create-progress-label">Preparing…</p>
-              <p class="progress-percent" id="create-progress-percent">0%</p>
+            <div class="renderer-mode-row camera-zoom-row">
+              <label class="renderer-mode-label" for="camera-zoom-slider">Camera zoom</label>
+              <input type="range" id="camera-zoom-slider" min="0" max="100" step="1" value="50" aria-label="Camera zoom from far away to inside shapes" />
+              <span class="camera-zoom-val" id="camera-zoom-val">50</span>
+            </div>
+            <div class="canvas-frame">
+              <canvas id="visualizer" width="1280" height="720"></canvas>
+            </div>
+            <div class="transport">
+              <button id="play-btn" disabled>Play</button>
+              <button id="stop-btn" disabled>Stop</button>
+              <button type="button" id="mute-btn" disabled aria-pressed="false" title="Mute audio output">Mute</button>
+              <label class="playhead-wrap">
+                <span class="sr-only">Timeline</span>
+                <input type="range" id="playhead-slider" min="0" max="0" step="0.01" value="0" disabled aria-label="Timeline playhead" />
+              </label>
+              <button id="record-btn" disabled title="Record parameter changes while playing">Record</button>
+              <button type="button" id="clear-automation-btn" disabled title="Delete recording">Clear</button>
+              <span class="automation-status" id="automation-status"></span>
+              <div class="speed-control" id="speed-control" role="group" aria-label="Motion speed"></div>
+              <span id="time-display">0:00 / 0:00</span>
+            </div>
+            <p class="take-note">Record while playing · save everything with <strong>Save config</strong></p>
+          </section>
+        </main>
+
+        <!-- RIGHT: cinematic look + parameter mapping -->
+        <aside class="panel panel-right">
+          <section class="cinematic-section panel-inner collapsible-section is-collapsed" id="cinematic-section" hidden>
+            <button
+              type="button"
+              class="collapsible-section-toggle variation-header"
+              id="cinematic-section-toggle"
+              aria-expanded="false"
+              aria-controls="cinematic-section-body"
+            >
+              <span class="collapsible-section-toggle-text">
+                <span class="variation-title">Cinematic look</span>
+                <span class="variation-hint">Fog, light, bloom &amp; shade</span>
+              </span>
+              <span class="collapsible-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="collapsible-section-body" id="cinematic-section-body" hidden>
+            <div class="cinematic-grid" id="cinematic-sliders"></div>
+            <div class="cinematic-toggles">
+              <label class="cinematic-toggle shape-toggle active" id="cinematic-floor-toggle">
+                <input type="checkbox" id="cinematic-floor-check" checked aria-label="Show ground floor" />
+                <span>Ground floor</span>
+              </label>
+              <label class="cinematic-toggle shape-toggle active" id="cinematic-shadows-toggle">
+                <input type="checkbox" id="cinematic-shadows-check" checked aria-label="Cast shadows" />
+                <span>Cast shadows</span>
+              </label>
+              <label class="cinematic-toggle shape-toggle" id="cinematic-true-colors-toggle">
+                <input type="checkbox" id="cinematic-true-colors-check" aria-label="Match palette swatch colors" />
+                <span>True swatch colors</span>
+              </label>
+            </div>
+            <p class="variation-hint cinematic-floor-hint">True swatch colors off = original lit cinematic look. On = colors match palette squares more closely.</p>
+            <button type="button" class="variation-reset" id="cinematic-reset-btn">Reset cinematic</button>
             </div>
           </section>
-        </footer>
+          <section class="mapping-section panel-inner collapsible-section is-collapsed" id="mapping-section">
+            <button
+              type="button"
+              class="collapsible-section-toggle mapping-header"
+              id="mapping-section-toggle"
+              aria-expanded="false"
+              aria-controls="mapping-section-body"
+            >
+              <span class="collapsible-section-toggle-text">
+                <span class="mapping-title">Parameter mapping</span>
+                <span class="mapping-hint">Audio → visual properties</span>
+              </span>
+              <span class="collapsible-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="collapsible-section-body" id="mapping-section-body" hidden>
+            <div class="mapping-table-wrap">
+              <table class="mapping-table" id="mapping-table">
+                <thead>
+                  <tr>
+                    <th>Property</th>
+                    <th>Source</th>
+                    <th>Sens.</th>
+                    <th>In use</th>
+                  </tr>
+                </thead>
+                <tbody id="mapping-body"></tbody>
+              </table>
+            </div>
+            <button type="button" class="mapping-reset" id="mapping-reset">Reset mapping</button>
+            </div>
+          </section>
+          <section class="audio-sources-section panel-inner collapsible-section is-collapsed" id="audio-sources-section">
+            <button
+              type="button"
+              class="collapsible-section-toggle audio-sources-header"
+              id="audio-sources-section-toggle"
+              aria-expanded="false"
+              aria-controls="audio-sources-section-body"
+            >
+              <span class="collapsible-section-toggle-text">
+                <span class="audio-sources-title">Song analysis (live)</span>
+                <span class="mapping-hint">Real-time levels from the audio</span>
+              </span>
+              <span class="collapsible-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="collapsible-section-body" id="audio-sources-section-body" hidden>
+              <ul class="audio-sources-list" id="audio-sources-list"></ul>
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>

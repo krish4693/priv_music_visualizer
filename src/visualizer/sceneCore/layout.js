@@ -1,4 +1,6 @@
-export const MIN_ENTITIES = 8;
+import { elementMotionScale, elementTurnScale, element3dScale, elementSizeMultiplier } from '../elementMotion.js';
+
+export const MIN_ENTITIES = 1;
 export const MAX_ENTITIES = 28;
 
 export function createRng(seed) {
@@ -33,14 +35,16 @@ export function curatedLayout(n, w, h, spread = 0.5, rng = Math.random) {
  * @param {() => number} rng
  * @param {number} paletteLen
  */
-export function createBaseEntity(pos, i, variation, rng, paletteLen) {
-  const sizeSpread = variation.sizeSpread / 100;
+export function createBaseEntity(pos, i, variation, rng, paletteLen, entityCount = 1) {
   const spin = variation.spinIntensity / 100;
+  const turnMul = elementTurnScale(variation);
+  const dim3Mul = element3dScale(variation);
+  const motion = elementMotionScale(variation);
   const speedSpread = (variation.speedSpread ?? 45) / 100;
   const depth = variation.depthRange / 100;
-  const sizeMul = 1 + (rng() - 0.5) * sizeSpread * 0.55;
-  const zRange = 80 + depth * 200;
-  const spinMul = 0.35 + spin * 0.85;
+  const sizeMul = elementSizeMultiplier(variation, i, entityCount, rng);
+  const zRange = (80 + depth * 200) * dim3Mul * motion;
+  const spinMul = (0.35 + spin * 0.85) * turnMul * motion;
   const z = (rng() - 0.5) * zRange * 2;
 
   return {

@@ -77,6 +77,50 @@ export async function analyzeAudioBuffer(audioBuffer, onProgress) {
   return { duration, sampleRate, frameCount, frames };
 }
 
+/** @param {{ duration: number, sampleRate: number, frameCount: number, frames: object[] }} analysis */
+export function serializeAnalysis(analysis) {
+  return {
+    duration: analysis.duration,
+    sampleRate: analysis.sampleRate,
+    frameCount: analysis.frameCount,
+    frames: analysis.frames.map((f) => ({
+      time: f.time,
+      rms: f.rms,
+      bass: f.bass,
+      mid: f.mid,
+      high: f.high,
+      bars: f.bars ? Array.from(f.bars) : [],
+      waveform: f.waveform ?? [],
+      beat: f.beat,
+      beatPulse: f.beatPulse,
+      tempo: f.tempo,
+      pitch: f.pitch,
+      centroid: f.centroid,
+      spread: f.spread,
+      texture: f.texture,
+    })),
+  };
+}
+
+/** @param {ReturnType<typeof serializeAnalysis>} data */
+export function deserializeAnalysis(data) {
+  if (!data?.frames?.length) return null;
+  return {
+    duration: data.duration,
+    sampleRate: data.sampleRate,
+    frameCount: data.frameCount,
+    frames: data.frames.map((f) => ({
+      ...f,
+      bars: new Float32Array(f.bars ?? []),
+    })),
+  };
+}
+
+/** @param {File|Blob} file */
+export function audioFileFingerprint(file) {
+  return `${file.name}|${file.size}`;
+}
+
 function yieldToMain() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }

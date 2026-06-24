@@ -11,7 +11,7 @@ export function initOrigami(ctx) {
   const positions = curatedLayout(count, width, height, spread, rng);
 
   const entities = positions.map((pos, i) => {
-    const e = createBaseEntity(pos, i, variation, rng, palette.length);
+    const e = createBaseEntity(pos, i, variation, rng, palette.length, count);
     const foldFrom = FOLD_TARGETS[Math.floor(rng() * FOLD_TARGETS.length)];
     const foldTo = FOLD_TARGETS[Math.floor(rng() * FOLD_TARGETS.length)];
     e.conceptData = {

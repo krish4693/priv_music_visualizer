@@ -26,7 +26,7 @@ export function initConstellation(ctx) {
   const positions = curatedLayout(count, width, height, spread, rng);
 
   const entities = positions.map((pos, i) => {
-    const e = createBaseEntity(pos, i, variation, rng, palette.length);
+    const e = createBaseEntity(pos, i, variation, rng, palette.length, count);
     e.conceptData = { nodeSize: 4 + rng() * 7, glow: rng() };
     e.rotSpeedX *= 0.35;
     e.rotSpeedY *= 0.35;

@@ -11,6 +11,10 @@ import {
 } from './cinematicSettingsStore.js';
 import { AutomationRecorder } from './automationStore.js';
 import { applyPalettePreset, getActivePalette } from './paletteStore.js';
+import { loadSongTitle, loadTitleFrequency } from './titleStore.js';
+import { isLivingSongConcept } from './visualConceptStore.js';
+import { initConceptEntities } from './concepts/index.js';
+import { livingSongExportTimeline } from './concepts/visualLivingSongConcept.js';
 
 const PREVIEW_WIDTH = 1280;
 const PREVIEW_HEIGHT = 720;
@@ -25,8 +29,9 @@ let currentViscosity = loadViscosity();
 let currentVariation = loadVariation();
 let currentPalette = null;
 let currentBackground = loadBackgroundColor();
-let currentSongTitle = '';
-let currentTitleFrequency = 0;
+let currentSongTitle = loadSongTitle();
+let currentSongDuration = 0;
+let currentTitleFrequency = loadTitleFrequency();
 let currentCinematicSettings = loadCinematicSettings();
 const playbackAutomation = new AutomationRecorder();
 /** @type {string|null} */
@@ -90,6 +95,90 @@ export function drawFrameAt(ctx, frame, time) {
   scene.draw(ctx);
 }
 
+/**
+ * Isolated render session for background export — does not touch the live preview scene.
+ * @param {number} width
+ * @param {number} height
+ * @param {import('./automationStore.js').AutomationKeyframe[]} [automationKeyframes]
+ */
+export function createExportSession(width, height, automationKeyframes = null) {
+  const exportAutomation = new AutomationRecorder();
+  if (automationKeyframes?.length) {
+    exportAutomation.loadKeyframes(automationKeyframes);
+  }
+  let lastPaletteSig = null;
+
+  const exportScene = rendererMode === 'cinematic'
+    ? new CinematicScene(width, height)
+    : new PopArtScene(width, height);
+
+  exportScene.setMappings(cloneMappings(currentMappings));
+  exportScene.setViscosity(currentViscosity);
+  exportScene.setVariation(cloneVariation(currentVariation));
+  exportScene.setBackgroundColor(currentBackground);
+  if (currentPalette) exportScene.setPalette(currentPalette);
+  exportScene.setSongTitle(currentSongTitle);
+  exportScene.setSongDuration?.(currentSongDuration);
+  exportScene.setTitleFrequency(currentTitleFrequency);
+  exportScene.setCinematicSettings?.(normalizeCinematicSettings(currentCinematicSettings));
+  if (!exportScene.shapes.length) exportScene.regenerate();
+
+  function syncExportAutomation(time) {
+    if (!exportAutomation.isActive) {
+      exportScene.setAutomationSample?.(null);
+      return;
+    }
+    const sample = exportAutomation.sampleAt(time);
+    if (!sample) {
+      exportScene.setAutomationSample?.(null);
+      return;
+    }
+    exportScene.setAutomationSample?.(sample);
+    exportScene.setViscosity(sample.viscosity);
+    exportScene.setMappings(sample.mappings);
+    if (sample.palette?.selectedKeys?.length) {
+      const sig = [...sample.palette.selectedKeys].sort().join('|');
+      if (sig !== lastPaletteSig) {
+        lastPaletteSig = sig;
+        const paletteState = applyPalettePreset(sample.palette);
+        const active = getActivePalette(paletteState.fullPalette, paletteState.selectedPaletteIndices);
+        exportScene.setPalette(active);
+      }
+    }
+  }
+
+  return {
+    drawFrameAt(ctx, frame, time, automationTime = time) {
+      syncExportAutomation(automationTime);
+      exportScene.update({ ...frame, time });
+      exportScene.draw(ctx);
+    },
+    drawBackdrop(ctx) {
+      ctx.fillStyle = currentBackground || DEFAULT_BG;
+      ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    },
+    getLivingSongExportTimeline(clipDuration) {
+      if (!isLivingSongConcept(exportScene.variation?.visualConcept)) {
+        return {
+          completionTime: clipDuration,
+          tailSeconds: 0,
+          holdSeconds: 0,
+          totalDuration: clipDuration,
+        };
+      }
+      if (!exportScene._conceptState?.rivers?.length) {
+        initConceptEntities(exportScene, width, height);
+      }
+      const rivers = exportScene._conceptState?.rivers ?? [];
+      const animationSpeed = exportScene.variation?.animationSpeed ?? 1;
+      return livingSongExportTimeline(clipDuration, animationSpeed, rivers);
+    },
+    dispose() {
+      exportScene.dispose?.();
+    },
+  };
+}
+
 function createScene(width, height) {
   return rendererMode === 'cinematic'
     ? new CinematicScene(width, height)
@@ -109,6 +198,7 @@ function applySceneSettings() {
   scene.setBackgroundColor(currentBackground);
   if (currentPalette) scene.setPalette(currentPalette);
   scene.setSongTitle(currentSongTitle);
+  scene.setSongDuration?.(currentSongDuration);
   scene.setTitleFrequency(currentTitleFrequency);
   scene.setCinematicSettings?.(currentCinematicSettings);
   if (!scene.shapes.length) scene.regenerate();
@@ -164,6 +254,15 @@ export function getSongTitle() {
   return currentSongTitle;
 }
 
+export function setSongDuration(seconds) {
+  currentSongDuration = Math.max(0, seconds || 0);
+  scene?.setSongDuration?.(currentSongDuration);
+}
+
+export function getSongDuration() {
+  return currentSongDuration;
+}
+
 export function setTitleFrequency(freq) {
   currentTitleFrequency = Math.min(100, Math.max(0, Math.round(freq)));
   scene?.setTitleFrequency(currentTitleFrequency);
@@ -197,8 +296,21 @@ export function regenerateVariation() {
   scene?.regenerate();
 }
 
-export function resetPlayhead() {
-  scene?.resetPlayhead();
+export function resetPlayhead(options = {}) {
+  scene?.resetPlayhead?.(options);
+}
+
+/** Reset motion/damping only — keeps concept paths (e.g. living song rivers) when scrubbing. */
+export function resetMotionState() {
+  scene?.resetPlayhead?.({ resetConcept: false });
+}
+
+/** Run scene updates without drawing (warm damped filters after scrub). */
+export function warmScenePreview(frame, steps = 6) {
+  if (!scene || steps <= 0) return;
+  for (let i = 0; i < steps; i++) {
+    scene.update(frame);
+  }
 }
 
 export function setMappingMatrix(mappings) {

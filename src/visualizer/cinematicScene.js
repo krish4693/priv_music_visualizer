@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { createAudioSourceState, extractAudioSources, resetAudioSourceState } from '../audio/sources.js';
 import { resolveMappedValues, DEFAULT_MAPPINGS, VISUAL_TARGETS } from './mappingMatrix.js';
 import { DEFAULT_VARIATION } from './variationStore.js';
+import { elementMotionScale, elementTurnScale, element3dScale, elementSizeMultiplier } from './elementMotion.js';
+import { elementDistanceRange, applyShapeBalloonSeparation } from './elementBalloonPhysics.js';
 import { DEFAULT_BG } from './backgroundStore.js';
 import { POP_ART_COLORS, resolvePalette } from './popArtPalette.js';
 import { SHAPE_PRESETS } from './shapePresets.js';
@@ -21,10 +23,16 @@ import {
   applyConceptSceneTransforms,
   updateConceptSceneColors,
   clearConceptObjects,
+  drawConceptScene,
   isGeometricConcept,
+  resetLivingSongState,
 } from './concepts/index.js';
+import { isCanvasFluidConcept, isLivingSongConcept } from './visualConceptStore.js';
+import { drawLivingSongSpaceBackground } from './sceneCore/spaceBackground.js';
+import { drawLivingSongOverlays } from './concepts/conceptRenderers.js';
+import { resetLiquidSim } from './concepts/liquidsOnCanvasConcept.js';
 
-const MIN_SHAPES = 8;
+const MIN_SHAPES = 1;
 const MAX_SHAPES = 28;
 
 function lerp(a, b, t) {
@@ -110,6 +118,7 @@ export class CinematicScene {
     this._beatFlash = 0;
     this.shapes = [];
     this.songTitle = '';
+    this.songDuration = 0;
     this.titleFrequency = 65;
     this.titleColorIdx = 0;
     this.title = {
@@ -139,11 +148,13 @@ export class CinematicScene {
     this._camera = new THREE.PerspectiveCamera(42, this.width / this.height, 0.1, 120);
     this._cameraRig = new CameraRig(this._camera);
     this._cameraRig.setOrbitAmount(this.cinematicSettings.cameraOrbit);
+    this._cameraRig.setZoomAmount(this.cinematicSettings.cameraZoom);
 
     this._renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: false,
       alpha: false,
       preserveDrawingBuffer: true,
+      powerPreference: 'high-performance',
     });
     this._renderer.setSize(this.width, this.height, false);
     this._renderer.setPixelRatio(1);
@@ -160,7 +171,7 @@ export class CinematicScene {
     this._keyLight = new THREE.DirectionalLight(0xfff4e8, 1.35);
     this._keyLight.position.set(2.5, 7, 10);
     this._keyLight.castShadow = true;
-    this._keyLight.shadow.mapSize.set(1024, 1024);
+    this._keyLight.shadow.mapSize.set(512, 512);
     this._keyLight.shadow.camera.near = 1;
     this._keyLight.shadow.camera.far = 40;
     this._keyLight.shadow.camera.left = -12;
@@ -241,8 +252,9 @@ export class CinematicScene {
     this._ambient.intensity = (s.ambient / 100) * 1;
     this._floor.material.metalness = s.floorGloss / 100;
     this._floor.material.roughness = 1 - (s.floorGloss / 100) * 0.55;
-    this._floor.visible = s.showFloor;
+    this._floor.visible = s.showFloor && !isLivingSongConcept(getActiveConceptId(this.variation));
     this._cameraRig.setOrbitAmount(s.cameraOrbit);
+    this._cameraRig.setZoomAmount(s.cameraZoom);
     this._applyFog();
     if (this._post) applyPostSettings(this._post, s);
     this._updateMeshMaterials();
@@ -287,6 +299,10 @@ export class CinematicScene {
     if (getActiveConceptId(this.variation) === 'typography') {
       this.regenerate();
     }
+  }
+
+  setSongDuration(seconds) {
+    this.songDuration = Math.max(0, seconds || 0);
   }
 
   setTitleFrequency(freq) {
@@ -391,6 +407,16 @@ export class CinematicScene {
 
   setPalette(palette) {
     this.palette = palette?.length ? palette.map((c) => ({ ...c })) : [...POP_ART_COLORS];
+    if (isCanvasFluidConcept(getActiveConceptId(this.variation)) && this._conceptState?.sim) {
+      resetLiquidSim(
+        this._conceptState.sim,
+        this.palette,
+        this.rng,
+        this.variation.liquidSourceMode,
+      );
+    } else if (isLivingSongConcept(getActiveConceptId(this.variation)) && this._conceptState) {
+      resetLivingSongState(this.variation, this._conceptState, this.rng, this.palette.length);
+    }
     this._updateMeshColors();
     this._rebuildTitleMesh();
   }
@@ -425,6 +451,7 @@ export class CinematicScene {
     } else if (isGeometricConcept(nextConcept)) {
       for (const s of this.shapes) this._enforceEnabledTypes(s);
     }
+    this._floor.visible = this.cinematicSettings.showFloor && !isLivingSongConcept(nextConcept);
   }
 
   _rebuildEntities(width = this.width, height = this.height) {
@@ -432,11 +459,15 @@ export class CinematicScene {
     this.shapes = conceptEntities ?? this._initShapes(width, height);
   }
 
-  resetPlayhead() {
+  resetPlayhead(options = {}) {
+    const resetConcept = options.resetConcept !== false;
     this._prevFrameTime = null;
     this._motionTime = 0;
     resetAudioSourceState(this.sourceState);
     this.damped = { geometry: 0, color: 0, motion: 0, morphing: 0 };
+    if (resetConcept && isLivingSongConcept(getActiveConceptId(this.variation)) && this._conceptState) {
+      resetLivingSongState(this.variation, this._conceptState, this.rng, this.palette.length);
+    }
   }
 
   regenerate() {
@@ -518,20 +549,22 @@ export class CinematicScene {
   _initShapes(width, height) {
     const rng = this.rng;
     const count = Math.min(MAX_SHAPES, Math.max(MIN_SHAPES, this.variation.shapeCount));
-    const spread = this.variation.layoutSpread / 100;
-    const sizeSpread = this.variation.sizeSpread / 100;
+    const spread = (this.variation.layoutSpread / 100) * elementDistanceRange(this.variation, Math.min(width, height) * 0.5).orbitScale;
     const spin = this.variation.spinIntensity / 100;
     const speedSpread = (this.variation.speedSpread ?? DEFAULT_VARIATION.speedSpread) / 100;
     const depth = this.variation.depthRange / 100;
+    const turnMul = elementTurnScale(this.variation);
+    const dim3Mul = element3dScale(this.variation);
+    const motion = elementMotionScale(this.variation);
     const enabled = this._enabledShapeIds();
     const positions = curatedLayout(count, width, height, spread, rng);
 
     return positions.map((pos, i) => {
       const type = enabled[Math.floor(rng() * enabled.length)];
       const morphTarget = this._pickNextType(type, rng);
-      const sizeMul = 1 + (rng() - 0.5) * sizeSpread * 0.55;
-      const zRange = 80 + depth * 200;
-      const spinMul = 0.35 + spin * 0.85;
+      const sizeMul = elementSizeMultiplier(this.variation, i, count, rng);
+      const zRange = (80 + depth * 200) * dim3Mul * motion;
+      const spinMul = (0.35 + spin * 0.85) * turnMul * motion;
       const z = (rng() - 0.5) * zRange * 2;
 
       const shape = {
@@ -614,9 +647,9 @@ export class CinematicScene {
       const mesh = this._meshByShape.get(s);
       if (!mesh) continue;
       const w = screenToWorld(
-        s.x + (s.wobbleX ?? 0),
-        s.y + (s.wobbleY ?? 0),
-        s.z + (s.wobbleZ ?? 0),
+        s.x + (s.wobbleX ?? 0) + (s.balloonX ?? 0),
+        s.y + (s.wobbleY ?? 0) + (s.balloonY ?? 0),
+        s.z + (s.wobbleZ ?? 0) + (s.balloonZ ?? 0),
         this.width,
         this.height,
       );
@@ -725,7 +758,9 @@ export class CinematicScene {
 
     const drag = 0.978 + visc * 0.018;
     const driftSpeed = 16 + (1 - visc) * 62 + mot * 78;
-    const spinMul = 0.35 + (this.variation.spinIntensity / 100) * 0.85;
+    const spinMul = (0.35 + (this.variation.spinIntensity / 100) * 0.85)
+      * elementTurnScale(this.variation)
+      * elementMotionScale(this.variation);
     const rotRate = (0.24 + mot * 0.72) * spinMul;
     const breathe = 1 + geo * 0.22;
     const zLimit = 180 + depth * 140;
@@ -780,8 +815,29 @@ export class CinematicScene {
       }
     }
 
+    if (this.shapes.length && isGeometricConcept(getActiveConceptId(this.variation))) {
+      applyShapeBalloonSeparation(
+        this.shapes,
+        this.variation,
+        elementMotionScale(this.variation) * mot,
+        motionDt,
+        this.width,
+        this.height,
+      );
+    }
+
     if (useConcept) {
-      updateConceptExtras(this, { mot, geo, morph, motionDt, beat: frame.beat });
+      updateConceptExtras(this, {
+        mot,
+        geo,
+        morph,
+        motionDt,
+        beat: frame.beat,
+        sources,
+        songTime: frame.time ?? 0,
+        tempo: frame.tempo ?? 0.5,
+        songDuration: this.songDuration ?? 0,
+      });
     }
 
     this._cameraRig.update(this._motionTime, mot);
@@ -803,15 +859,17 @@ export class CinematicScene {
   }
 
   draw(ctx) {
-    updatePostTime(this._post, this._motionTime);
-    // EffectComposer output does not reach the default framebuffer when blitting
-    // WebGL into the 2D preview canvas — render the scene directly instead.
-    this._renderer.setRenderTarget(null);
-    this._renderer.clear(true, true, true);
-    this._renderer.render(this._threeScene, this._camera);
-    const gl = this._renderer.getContext();
-    gl.finish();
+    if (this.width < 2 || this.height < 2) return;
 
+    if (isLivingSongConcept(getActiveConceptId(this.variation))) {
+      drawLivingSongSpaceBackground(this, ctx);
+      drawConceptScene(this, ctx);
+      drawLivingSongOverlays(this, ctx);
+      return;
+    }
+
+    updatePostTime(this._post, this._motionTime);
+    this._post.composer.render();
     ctx.drawImage(this._renderer.domElement, 0, 0, this.width, this.height);
     this._drawLetterbox(ctx);
   }

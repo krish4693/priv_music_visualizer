@@ -4,9 +4,14 @@ import { DEFAULT_BG } from './backgroundStore.js';
 import { DEFAULT_TITLE_FREQUENCY } from './titleStore.js';
 import { normalizeCinematicSettings } from './cinematicSettingsStore.js';
 import { parseAutomationDocument } from './automationStore.js';
+import { deserializeAnalysis } from '../audio/analyzer.js';
 
-const CONFIG_VERSION = 2;
+export const CONFIG_VERSION = 3;
 const CONFIG_EXT = '.mviz.json';
+
+function clamp01(v, fallback) {
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback;
+}
 
 function normalizeLook(raw) {
   if (!raw || typeof raw !== 'object') return null;
@@ -17,9 +22,7 @@ function normalizeLook(raw) {
       mappings[key] = { ...DEFAULT_MAPPINGS[key], ...raw.mappings[key] };
     }
   }
-  const viscosity = Number.isFinite(raw.viscosity)
-    ? Math.min(1, Math.max(0, raw.viscosity))
-    : DEFAULT_VISCOSITY;
+  const viscosity = clamp01(Number(raw.viscosity), DEFAULT_VISCOSITY);
   const bgColor = typeof raw.bgColor === 'string' ? raw.bgColor : DEFAULT_BG;
   const title = typeof raw.title === 'string' ? raw.title.slice(0, 80) : '';
   const titleFrequency = Number.isFinite(raw.titleFrequency)
@@ -42,13 +45,55 @@ function normalizeAutomation(raw) {
   return { keyframes: raw.keyframes };
 }
 
-/** @param {{ rendererMode: string, look: object, automationKeyframes?: import('./automationStore.js').AutomationKeyframe[]|null, songName?: string }} input */
+/** @param {object} [raw] */
+function normalizeExportSettings(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return { clipFrom: 0, clipTo: null, includeAudio: true };
+  }
+  const clipFrom = Number.isFinite(Number(raw.clipFrom)) ? Math.max(0, Number(raw.clipFrom)) : 0;
+  const clipTo = raw.clipTo == null || raw.clipTo === ''
+    ? null
+    : (Number.isFinite(Number(raw.clipTo)) ? Math.max(0, Number(raw.clipTo)) : null);
+  return {
+    clipFrom,
+    clipTo,
+    includeAudio: raw.includeAudio !== false,
+  };
+}
+
+/** @param {object} [raw] */
+function normalizeAudioRef(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const fileName = typeof raw.fileName === 'string' ? raw.fileName : '';
+  const fingerprint = typeof raw.fingerprint === 'string' ? raw.fingerprint : null;
+  const url = typeof raw.url === 'string' && raw.url.trim() ? raw.url.trim() : null;
+  const duration = Number.isFinite(Number(raw.duration)) ? Number(raw.duration) : null;
+  const displayName = typeof raw.displayName === 'string' ? raw.displayName : fileName;
+  let analysis = null;
+  if (raw.analysis && typeof raw.analysis === 'object') {
+    analysis = deserializeAnalysis(raw.analysis);
+  }
+  if (!fileName && !url && !fingerprint && !analysis) return null;
+  return { fileName, fingerprint, url, duration, displayName, analysis };
+}
+
+/**
+ * @param {{
+ *   rendererMode: string,
+ *   look: object,
+ *   automationKeyframes?: import('./automationStore.js').AutomationKeyframe[]|null,
+ *   audio?: object|null,
+ *   export?: object|null,
+ * }} input
+ */
 export function buildAppConfig(input) {
   return {
     version: CONFIG_VERSION,
     savedAt: new Date().toISOString(),
     renderer: input.rendererMode === 'cinematic' ? 'cinematic' : 'popart',
     look: input.look,
+    export: normalizeExportSettings(input.export),
+    audio: input.audio ?? null,
     automation: input.automationKeyframes?.length
       ? { keyframes: input.automationKeyframes }
       : null,
@@ -99,12 +144,18 @@ export function parseAppConfig(text) {
       if (keyframes?.length) automation = { keyframes };
     }
 
-    if (!look && !automation) return null;
+    const exportSettings = normalizeExportSettings(parsed.export);
+    const audio = normalizeAudioRef(parsed.audio);
+
+    if (!look && !automation && !audio) return null;
 
     return {
       version: parsed.version ?? CONFIG_VERSION,
+      savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : null,
       renderer,
       look,
+      export: exportSettings,
+      audio,
       automation,
       legacyTake: !look && !!automation,
     };
