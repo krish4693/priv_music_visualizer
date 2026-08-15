@@ -18,6 +18,15 @@ function cornerRadiusFor(surface, w, h, d) {
   return Math.min(smallestSide * amount, smallestSide * MAX_CORNER_RATIO);
 }
 
+/** Fillet segments per 90° corner. Also sets the angle between adjacent fillet faces (90 / n). */
+const CORNER_SEGMENTS = 4;
+
+function buildBoxGeometry(w, h, d, surface) {
+  const radius = cornerRadiusFor(surface, w, h, d);
+  if (radius > 0) return new RoundedBoxGeometry(w, h, d, CORNER_SEGMENTS, radius);
+  return new THREE.BoxGeometry(w, h, d, 2, 2, 2);
+}
+
 function buildEggGeometry(sx, sy, sz) {
   const points = [];
   const segments = 28;
@@ -49,14 +58,8 @@ export function geometryForShapeType(typeId, sizeMul = 1, surface = null) {
   const sz = rz * UNIT * sizeMul;
 
   switch (kind) {
-    case 'box': {
-      const w = sx * 2;
-      const h = sy * 2;
-      const d = sz * 2;
-      const radius = cornerRadiusFor(surface, w, h, d);
-      if (radius > 0) return new RoundedBoxGeometry(w, h, d, 4, radius);
-      return new THREE.BoxGeometry(w, h, d, 2, 2, 2);
-    }
+    case 'box':
+      return buildBoxGeometry(sx * 2, sy * 2, sz * 2, surface);
     case 'ellipsoid': {
       const geo = new THREE.SphereGeometry(1, 32, 24);
       geo.scale(sx, sy, sz);
@@ -94,12 +97,49 @@ const EDGE_THRESHOLD_DEG = 24;
 const EDGE_COLOR = 0x0b0b12;
 
 /**
+ * Geometry to derive Kanten line segments from — usually the render geometry itself.
+ *
+ * A rounded box is the exception: its fillets step by 90/CORNER_SEGMENTS degrees, which is
+ * under EDGE_THRESHOLD_DEG, so EdgesGeometry finds no edges at all on it. Substituting a sharp
+ * box inset to the fillet crest puts the twelve lines back where the rounded edge actually bulges.
+ *
+ * @param {string} typeId
+ * @param {number} [sizeMul]
+ * @param {{ roundedEdges?: boolean, cornerRound?: number }} [surface]
+ */
+function outlineSourceGeometry(typeId, sizeMul = 1, surface = null) {
+  const preset = SHAPE_PRESETS[typeId];
+  if (preset?.kind === 'box') {
+    const w = preset.rx * UNIT * sizeMul * 2;
+    const h = preset.ry * UNIT * sizeMul * 2;
+    const d = preset.rz * UNIT * sizeMul * 2;
+    const radius = cornerRadiusFor(surface, w, h, d);
+    if (radius > 0) {
+      const inset = radius * (1 - Math.cos(Math.PI / 4)) * 2;
+      return new THREE.BoxGeometry(w - inset, h - inset, d - inset);
+    }
+  }
+  return null;
+}
+
+function edgesFor(geometry, typeId, sizeMul, surface) {
+  const source = outlineSourceGeometry(typeId, sizeMul, surface);
+  if (!source) return new THREE.EdgesGeometry(geometry, EDGE_THRESHOLD_DEG);
+  const edges = new THREE.EdgesGeometry(source, EDGE_THRESHOLD_DEG);
+  source.dispose();
+  return edges;
+}
+
+/**
  * Builds the dark "Kanten" outline that rides along with a shape mesh.
  * @param {THREE.BufferGeometry} geometry
+ * @param {string} typeId
+ * @param {number} [sizeMul]
+ * @param {{ roundedEdges?: boolean, cornerRound?: number }} [surface]
  */
-export function createEdgeOutline(geometry) {
+export function createEdgeOutline(geometry, typeId, sizeMul = 1, surface = null) {
   const lines = new THREE.LineSegments(
-    new THREE.EdgesGeometry(geometry, EDGE_THRESHOLD_DEG),
+    edgesFor(geometry, typeId, sizeMul, surface),
     new THREE.LineBasicMaterial({ color: EDGE_COLOR, transparent: true, opacity: 0.85 }),
   );
   lines.castShadow = false;
@@ -111,10 +151,13 @@ export function createEdgeOutline(geometry) {
  * Rebuilds an outline's segments after its parent geometry changed.
  * @param {THREE.LineSegments} outline
  * @param {THREE.BufferGeometry} geometry
+ * @param {string} typeId
+ * @param {number} [sizeMul]
+ * @param {{ roundedEdges?: boolean, cornerRound?: number }} [surface]
  */
-export function refreshEdgeOutline(outline, geometry) {
+export function refreshEdgeOutline(outline, geometry, typeId, sizeMul = 1, surface = null) {
   outline.geometry.dispose();
-  outline.geometry = new THREE.EdgesGeometry(geometry, EDGE_THRESHOLD_DEG);
+  outline.geometry = edgesFor(geometry, typeId, sizeMul, surface);
 }
 
 /** @param {THREE.Color} color @param {{ metalness?: number, roughness?: number, emissive?: number, trueColors?: boolean }} [opts] */

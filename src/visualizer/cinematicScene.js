@@ -563,10 +563,11 @@ export class CinematicScene {
     const mesh = this._meshByShape.get(s);
     if (!mesh) return;
     const activeType = this._activeShapeType(s);
+    const surface = this._surfaceOpts();
     mesh.geometry.dispose();
-    mesh.geometry = geometryForShapeType(activeType, s.sizeMul, this._surfaceOpts());
+    mesh.geometry = geometryForShapeType(activeType, s.sizeMul, surface);
     const outline = this._outlineByShape.get(s);
-    if (outline) refreshEdgeOutline(outline, mesh.geometry);
+    if (outline) refreshEdgeOutline(outline, mesh.geometry, activeType, s.sizeMul, surface);
   }
 
   _advanceMorph(s) {
@@ -655,15 +656,17 @@ export class CinematicScene {
     this._meshByShape = new Map();
     this._outlineByShape = new Map();
     const showEdges = !!this.variation.kanten;
+    const surface = this._surfaceOpts();
     for (let i = 0; i < this.shapes.length; i++) {
       const s = this.shapes[i];
+      const activeType = this._activeShapeType(s);
       const color = paletteColorThree(this.palette, s.colorIdx + this.colorOffset);
-      const geo = geometryForShapeType(this._activeShapeType(s), s.sizeMul, this._surfaceOpts());
+      const geo = geometryForShapeType(activeType, s.sizeMul, surface);
       const mat = cinematicMaterial(color, this._materialOpts());
       const mesh = new THREE.Mesh(geo, mat);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      const outline = createEdgeOutline(geo);
+      const outline = createEdgeOutline(geo, activeType, s.sizeMul, surface);
       outline.visible = showEdges;
       mesh.add(outline);
       this._shapeRoot.add(mesh);
