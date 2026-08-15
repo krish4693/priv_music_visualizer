@@ -7,7 +7,14 @@ import { elementDistanceRange, applyShapeBalloonSeparation } from './elementBall
 import { DEFAULT_BG } from './backgroundStore.js';
 import { POP_ART_COLORS, resolvePalette } from './popArtPalette.js';
 import { SHAPE_PRESETS } from './shapePresets.js';
-import { geometryForShapeType, cinematicMaterial, updateCinematicMaterial, UNIT } from './three/shapeFactory.js';
+import {
+  geometryForShapeType,
+  cinematicMaterial,
+  updateCinematicMaterial,
+  createEdgeOutline,
+  refreshEdgeOutline,
+  UNIT,
+} from './three/shapeFactory.js';
 import { CameraRig } from './three/cameraRig.js';
 import { createPostPipeline, resizePostPipeline, disposePostPipeline, applyPostSettings, updatePostTime } from './three/postPipeline.js';
 import { loadCinematicSettings, normalizeCinematicSettings } from './cinematicSettingsStore.js';
@@ -438,6 +445,8 @@ export class CinematicScene {
     const prevEnabled = [...(this.variation.enabledShapes ?? [])].sort().join(',');
     const prevConcept = getActiveConceptId(this.variation);
     const prevCount = this.variation.shapeCount;
+    const prevSurface = this._surfaceOpts();
+    const prevKanten = !!this.variation.kanten;
     this.variation = {
       ...settings,
       enabledShapes: settings.enabledShapes?.length ? [...settings.enabledShapes] : ['cube'],
@@ -450,6 +459,15 @@ export class CinematicScene {
       this.regenerate();
     } else if (isGeometricConcept(nextConcept)) {
       for (const s of this.shapes) this._enforceEnabledTypes(s);
+      const nextSurface = this._surfaceOpts();
+      if (
+        prevSurface.roundedEdges !== nextSurface.roundedEdges ||
+        prevSurface.cornerRound !== nextSurface.cornerRound
+      ) {
+        // Rebuild geometry in place so dragging the roundness slider stays smooth.
+        for (const s of this.shapes) this._updateMeshGeometryForShape(s);
+      }
+      if (prevKanten !== !!this.variation.kanten) this._syncEdgeOutlineVisibility();
     }
     this._floor.visible = this.cinematicSettings.showFloor && !isLivingSongConcept(nextConcept);
   }
@@ -528,12 +546,27 @@ export class CinematicScene {
     return s.morphT < 0.5 ? s.type : s.morphTarget;
   }
 
+  /** Surface options the Pop Art renderer also honours — rounded corners and their amount. */
+  _surfaceOpts() {
+    return {
+      roundedEdges: !!this.variation.roundedEdges,
+      cornerRound: this.variation.cornerRound ?? DEFAULT_VARIATION.cornerRound,
+    };
+  }
+
+  _syncEdgeOutlineVisibility() {
+    const showEdges = !!this.variation.kanten;
+    for (const outline of this._outlineByShape?.values() ?? []) outline.visible = showEdges;
+  }
+
   _updateMeshGeometryForShape(s) {
     const mesh = this._meshByShape.get(s);
     if (!mesh) return;
     const activeType = this._activeShapeType(s);
     mesh.geometry.dispose();
-    mesh.geometry = geometryForShapeType(activeType, s.sizeMul);
+    mesh.geometry = geometryForShapeType(activeType, s.sizeMul, this._surfaceOpts());
+    const outline = this._outlineByShape.get(s);
+    if (outline) refreshEdgeOutline(outline, mesh.geometry);
   }
 
   _advanceMorph(s) {
@@ -603,7 +636,7 @@ export class CinematicScene {
     clearConceptObjects(this);
     for (const child of [...this._shapeRoot.children]) {
       child.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) {
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments) {
           obj.geometry?.dispose();
           if (obj.material instanceof THREE.Material) obj.material.dispose();
         }
@@ -611,6 +644,7 @@ export class CinematicScene {
       this._shapeRoot.remove(child);
     }
     this._meshByShape = new Map();
+    this._outlineByShape = new Map();
   }
 
   _syncMeshes() {
@@ -619,16 +653,22 @@ export class CinematicScene {
       return;
     }
     this._meshByShape = new Map();
+    this._outlineByShape = new Map();
+    const showEdges = !!this.variation.kanten;
     for (let i = 0; i < this.shapes.length; i++) {
       const s = this.shapes[i];
       const color = paletteColorThree(this.palette, s.colorIdx + this.colorOffset);
-      const geo = geometryForShapeType(this._activeShapeType(s), s.sizeMul);
+      const geo = geometryForShapeType(this._activeShapeType(s), s.sizeMul, this._surfaceOpts());
       const mat = cinematicMaterial(color, this._materialOpts());
       const mesh = new THREE.Mesh(geo, mat);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      const outline = createEdgeOutline(geo);
+      outline.visible = showEdges;
+      mesh.add(outline);
       this._shapeRoot.add(mesh);
       this._meshByShape.set(s, mesh);
+      this._outlineByShape.set(s, outline);
     }
     this._applyShapeTransforms();
   }

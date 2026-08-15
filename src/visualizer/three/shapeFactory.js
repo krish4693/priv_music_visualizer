@@ -1,7 +1,22 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { SHAPE_PRESETS } from '../shapePresets.js';
 
 const UNIT = 0.01;
+
+/** Matches the Pop Art corner scale so both renderers round by the same amount. */
+const CORNER_SCALE = 0.55;
+/** Keeps the corner radius below half the smallest side, so faces never self-intersect. */
+const MAX_CORNER_RATIO = 0.48;
+
+/** @param {{ roundedEdges?: boolean, cornerRound?: number }} [surface] */
+function cornerRadiusFor(surface, w, h, d) {
+  if (!surface?.roundedEdges) return 0;
+  const amount = Math.min(1, Math.max(0, (surface.cornerRound ?? 45) / 100)) * CORNER_SCALE;
+  if (amount <= 0) return 0;
+  const smallestSide = Math.min(w, h, d);
+  return Math.min(smallestSide * amount, smallestSide * MAX_CORNER_RATIO);
+}
 
 function buildEggGeometry(sx, sy, sz) {
   const points = [];
@@ -19,8 +34,12 @@ function buildEggGeometry(sx, sy, sz) {
   return geo;
 }
 
-/** @param {string} typeId @param {number} [sizeMul] */
-export function geometryForShapeType(typeId, sizeMul = 1) {
+/**
+ * @param {string} typeId
+ * @param {number} [sizeMul]
+ * @param {{ roundedEdges?: boolean, cornerRound?: number }} [surface]
+ */
+export function geometryForShapeType(typeId, sizeMul = 1, surface = null) {
   const preset = SHAPE_PRESETS[typeId];
   if (!preset) return new THREE.BoxGeometry(1, 1, 1);
 
@@ -30,8 +49,14 @@ export function geometryForShapeType(typeId, sizeMul = 1) {
   const sz = rz * UNIT * sizeMul;
 
   switch (kind) {
-    case 'box':
-      return new THREE.BoxGeometry(sx * 2, sy * 2, sz * 2, 2, 2, 2);
+    case 'box': {
+      const w = sx * 2;
+      const h = sy * 2;
+      const d = sz * 2;
+      const radius = cornerRadiusFor(surface, w, h, d);
+      if (radius > 0) return new RoundedBoxGeometry(w, h, d, 4, radius);
+      return new THREE.BoxGeometry(w, h, d, 2, 2, 2);
+    }
     case 'ellipsoid': {
       const geo = new THREE.SphereGeometry(1, 32, 24);
       geo.scale(sx, sy, sz);
@@ -44,8 +69,11 @@ export function geometryForShapeType(typeId, sizeMul = 1) {
     case 'octahedron':
       return new THREE.OctahedronGeometry(Math.max(sx, sy, sz));
     case 'cone':
-      return new THREE.ConeGeometry(Math.max(sx, sz), sy * 2, 28);
+      // Matches Pop Art: rounding off facets the cone down to a 4-sided pyramid.
+      return new THREE.ConeGeometry(Math.max(sx, sz), sy * 2, surface?.roundedEdges === false ? 4 : 28);
     case 'cylinder':
+      // Matches Pop Art: rounding off squares the cylinder off into a box.
+      if (surface?.roundedEdges === false) return new THREE.BoxGeometry(sx * 2, sy * 2, sz * 2);
       return new THREE.CylinderGeometry(Math.max(sx, sz), Math.max(sx, sz), sy * 2, 28);
     case 'prism':
       return new THREE.CylinderGeometry(Math.max(sx, sz), Math.max(sx, sz), sy * 2, 3);
@@ -59,6 +87,34 @@ export function geometryForShapeType(typeId, sizeMul = 1) {
     default:
       return new THREE.BoxGeometry(sx * 2, sy * 2, sz * 2);
   }
+}
+
+/** Angle below which coplanar-ish faces are not outlined — keeps curved shapes from turning into wireframes. */
+const EDGE_THRESHOLD_DEG = 24;
+const EDGE_COLOR = 0x0b0b12;
+
+/**
+ * Builds the dark "Kanten" outline that rides along with a shape mesh.
+ * @param {THREE.BufferGeometry} geometry
+ */
+export function createEdgeOutline(geometry) {
+  const lines = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geometry, EDGE_THRESHOLD_DEG),
+    new THREE.LineBasicMaterial({ color: EDGE_COLOR, transparent: true, opacity: 0.85 }),
+  );
+  lines.castShadow = false;
+  lines.receiveShadow = false;
+  return lines;
+}
+
+/**
+ * Rebuilds an outline's segments after its parent geometry changed.
+ * @param {THREE.LineSegments} outline
+ * @param {THREE.BufferGeometry} geometry
+ */
+export function refreshEdgeOutline(outline, geometry) {
+  outline.geometry.dispose();
+  outline.geometry = new THREE.EdgesGeometry(geometry, EDGE_THRESHOLD_DEG);
 }
 
 /** @param {THREE.Color} color @param {{ metalness?: number, roughness?: number, emissive?: number, trueColors?: boolean }} [opts] */
