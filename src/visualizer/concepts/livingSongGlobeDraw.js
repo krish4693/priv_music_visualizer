@@ -455,7 +455,9 @@ export function drawVisualLivingSongGlobe(scene, ctx) {
   const laneCount = unicolor ? 1 : Math.max(1, palette.length);
   const emergence = globeEmergence(songTime, songDuration);
   const pathDetail = effectiveGlobePathDetail(globeDetail, objectCount);
-  const useGrowingCapsules = shapeId === 'sphere' && !!variation.globeDenseProof;
+  // Sphere packs a dense capsule shell that grows in over the song and closes at the end.
+  // The three-thread path it used to fall through to could never fill the shell.
+  const useGrowingCapsules = shapeId === 'sphere';
   const useThreeThreads = shapeId === 'sphere' && !useGrowingCapsules;
   const threadLaneCount = useThreeThreads ? Math.min(3, Math.max(1, palette.length)) : laneCount;
   const growDuration = songDuration > 0 ? songDuration : 180;
