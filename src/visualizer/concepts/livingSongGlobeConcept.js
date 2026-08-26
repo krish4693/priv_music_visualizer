@@ -66,48 +66,6 @@ function cartToSpherical(x, y, z) {
   };
 }
 
-function normalize3v([x, y, z]) {
-  const len = Math.hypot(x, y, z) || 1;
-  return [x / len, y / len, z / len];
-}
-
-function slerpUnit(a, b, t) {
-  let dotab = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-  dotab = clamp(dotab, -1, 1);
-  const omega = Math.acos(dotab);
-  if (omega < 1e-5) {
-    return normalize3v([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]);
-  }
-  const sinOmega = Math.sin(omega);
-  const w1 = Math.sin((1 - t) * omega) / sinOmega;
-  const w2 = Math.sin(t * omega) / sinOmega;
-  return [a[0] * w1 + b[0] * w2, a[1] * w1 + b[1] * w2, a[2] * w1 + b[2] * w2];
-}
-
-/** Long geodesic thread arcs on the sphere shell — few turns, smooth bands. */
-function buildSphereThreadChain(theta, phi, steps, radius, rng) {
-  /** @type {number[][]} */
-  const chain = [];
-  let i = 0;
-  while (i < steps) {
-    const bandLen = Math.min(32 + Math.floor(rng() * 18), steps - i);
-    const endTheta = theta + (rng() - 0.5) * 1.5;
-    const endPhi = clamp(phi + (rng() - 0.5) * 1.0, 0.1, Math.PI - 0.1);
-    const startU = normalize3v(sphericalToCart(theta, phi, 1));
-    const endU = normalize3v(sphericalToCart(endTheta, endPhi, 1));
-    for (let k = 0; k < bandLen; k++) {
-      const u = bandLen <= 1 ? 0 : k / (bandLen - 1);
-      const [ux, uy, uz] = slerpUnit(startU, endU, u);
-      const shellR = radius * (0.997 + rng() * 0.002);
-      chain.push([ux * shellR, uy * shellR, uz * shellR]);
-      i++;
-    }
-    theta = endTheta;
-    phi = endPhi;
-  }
-  return chain;
-}
-
 /** @param {number} nx @param {number} ny @param {number} nz @param {import('../globeShapeModes.js').GlobeShapeMode} shapeId @param {number} targetR @param {number} pathSeed @param {number} pointIndex */
 export function projectToShapeShell(nx, ny, nz, shapeId, targetR, pathSeed = 0, pointIndex = 0) {
   switch (shapeId) {
@@ -179,10 +137,6 @@ export function buildWildShapeChain(pathSeed, colorIdx, segmentIndex, radius, sh
   } else {
     theta = rng() * Math.PI * 2;
     phi = Math.acos(2 * rng() - 1);
-  }
-
-  if (shapeId === 'sphere') {
-    return buildSphereThreadChain(theta, phi, steps, radius, rng);
   }
 
   for (let i = 0; i < steps; i++) {
