@@ -71,6 +71,13 @@ import { GLOBE_TUBE_PROFILES } from './visualizer/globeTubeProfile.js';
 import { AutomationRecorder } from './visualizer/automationStore.js';
 import { buildAppConfig, downloadAppConfig, parseAppConfig, suggestConfigFilename } from './visualizer/configStore.js';
 import { loadBackgroundColor, saveBackgroundColor } from './visualizer/backgroundStore.js';
+import {
+  loadSongTitle,
+  saveSongTitle,
+  loadTitleFrequency,
+  saveTitleFrequency,
+  titleFromFilename,
+} from './visualizer/titleStore.js';
 import { setupHelpPanel } from './help/setupHelpPanel.js';
 import {
   CINEMATIC_SLIDERS,
