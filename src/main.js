@@ -90,6 +90,7 @@ const BUNDLED_AUDIO_NAME = '09 TheBlueMonk.mp3';
 
 const fileInput = document.getElementById('file-input');
 const dropzone = document.getElementById('dropzone');
+const loadSampleBtn = document.getElementById('load-sample-btn');
 const fileNameEl = document.getElementById('file-name');
 const canvas = document.getElementById('visualizer');
 const playBtn = document.getElementById('play-btn');
@@ -272,6 +273,7 @@ function silentFrame() {
 
 setupDropzone();
 fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
+loadSampleBtn?.addEventListener('click', () => tryLoadBundledAudio());
 playBtn.addEventListener('click', togglePlay);
 stopBtn.addEventListener('click', stopPlayback);
 muteBtn?.addEventListener('click', toggleMute);
