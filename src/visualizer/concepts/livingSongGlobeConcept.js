@@ -121,6 +121,10 @@ function morphTorusPoint(x, y, z, e2, majorR, pathSeed, i) {
  */
 export function buildWildShapeChain(pathSeed, colorIdx, segmentIndex, radius, shapeId, detail = 50, continueFrom = null) {
   if (shapeId === 'torus') return buildWildTorusChain(pathSeed, colorIdx, segmentIndex, radius, detail, continueFrom);
+  if (shapeId === 'sphereCurvedZigzag') return buildCurvedZigzagChain(pathSeed, colorIdx, segmentIndex, radius, detail, continueFrom);
+  if (shapeId === 'sphereSpiralWrap') return buildSphereWeaveChain(pathSeed, colorIdx, segmentIndex, radius, detail, { thetaTurnsPerSegment: 0.55, phiCyclesPerSegment: 0.16 });
+  if (shapeId === 'sphereLatitudeBands') return buildSphereWeaveChain(pathSeed, colorIdx, segmentIndex, radius, detail, { thetaTurnsPerSegment: 0.9, phiCyclesPerSegment: 0.02 });
+  if (shapeId === 'sphereRiverMeander') return buildRiverMeanderChain(pathSeed, colorIdx, segmentIndex, radius, detail);
 
   const { stepsMin, stepsRange } = globeDetailParams(detail);
   const rng = createRng((pathSeed + segmentIndex * 15937 + colorIdx * 4099) >>> 0);
@@ -160,6 +164,172 @@ export function buildWildShapeChain(pathSeed, colorIdx, segmentIndex, radius, sh
       chain.push(sphericalToCart(theta, phi, r * bump));
     } else {
       chain.push(sphericalToCart(theta, phi, r));
+    }
+  }
+  return chain;
+}
+
+/**
+ * Curved zigzag — same waypoint sequence/turn angles as the plain sphere walk (keeps the
+ * angular, energetic direction changes), but each corner gets a short bezier fillet instead
+ * of meeting at a hard point. Mostly straight segments, corners softened.
+ * @param {number[]|null} [continueFrom]
+ */
+function buildCurvedZigzagChain(pathSeed, colorIdx, segmentIndex, radius, detail = 50, continueFrom = null) {
+  const { stepsMin, stepsRange } = globeDetailParams(detail);
+  const rng = createRng((pathSeed + segmentIndex * 15937 + colorIdx * 4099) >>> 0);
+  // Each waypoint expands into 7 output points below (fillet subdivision). Downstream tube
+  // drawing caps chains at ~140 points via a plain index-stride decimator, which is blind to
+  // where the curved corners are — feed it too many waypoints and it resamples straight past
+  // the fillets, so the corners come out sharp again despite the curve math being correct here.
+  // Keep the waypoint count low enough that the full chain stays under that cap.
+  const waypointMin = Math.max(6, Math.round(stepsMin / 9));
+  const waypointRange = Math.max(4, Math.round(stepsRange / 9));
+  const steps = waypointMin + Math.floor(rng() * waypointRange);
+
+  let theta;
+  let phi;
+  if (continueFrom) {
+    const s = cartToSpherical(continueFrom[0], continueFrom[1], continueFrom[2]);
+    theta = s.theta + (rng() - 0.5) * 0.55;
+    phi = clamp(s.phi + (rng() - 0.5) * 0.4, 0.1, Math.PI - 0.1);
+  } else {
+    theta = rng() * Math.PI * 2;
+    phi = Math.acos(2 * rng() - 1);
+  }
+
+  /** @type {number[][]} */
+  const waypoints = [];
+  for (let i = 0; i < steps; i++) {
+    const wobble = (rng() - 0.5) * 0.38 + Math.sin(i * 0.31 + pathSeed * 0.01) * 0.22;
+    theta += (rng() - 0.5) * 0.78;
+    phi = clamp(phi + (rng() - 0.5) * 0.58, 0.08, Math.PI - 0.08);
+    const r = radius * (0.55 + rng() * 0.95 + wobble * 0.35);
+    waypoints.push(sphericalToCart(theta, phi, r));
+  }
+  if (waypoints.length < 3) return waypoints;
+
+  const roundAmt = 0.28;
+  const filletSteps = 6;
+  /** @type {number[][]} */
+  const chain = [waypoints[0]];
+  for (let i = 1; i < waypoints.length - 1; i++) {
+    const a = waypoints[i - 1];
+    const b = waypoints[i];
+    const c = waypoints[i + 1];
+    const inPt = [
+      a[0] + (b[0] - a[0]) * (1 - roundAmt),
+      a[1] + (b[1] - a[1]) * (1 - roundAmt),
+      a[2] + (b[2] - a[2]) * (1 - roundAmt),
+    ];
+    const outPt = [
+      b[0] + (c[0] - b[0]) * roundAmt,
+      b[1] + (c[1] - b[1]) * roundAmt,
+      b[2] + (c[2] - b[2]) * roundAmt,
+    ];
+    chain.push(inPt);
+    for (let k = 1; k < filletSteps; k++) {
+      const t = k / filletSteps;
+      const u = 1 - t;
+      chain.push([
+        u * u * inPt[0] + 2 * u * t * b[0] + t * t * outPt[0],
+        u * u * inPt[1] + 2 * u * t * b[1] + t * t * outPt[1],
+        u * u * inPt[2] + 2 * u * t * b[2] + t * t * outPt[2],
+      ]);
+    }
+    chain.push(outPt);
+  }
+  chain.push(waypoints[waypoints.length - 1]);
+  return chain;
+}
+
+/**
+ * Deterministic weave pattern on the sphere shell — a pure function of a cumulative
+ * parameter `u` that keeps advancing across segments (u = segmentIndex + localT), so
+ * consecutive segments always meet exactly at their shared boundary with no jump and
+ * no need to read a `continueFrom` point. Each river just extends the SAME curve
+ * further as the song goes on (more wraps/rings) instead of piling up independent
+ * scattered segments — that's what keeps it coherent even once fully accumulated.
+ * theta/phi rates control the look: comparable rates ≈ diagonal spiral wrap;
+ * theta rate >> phi rate ≈ near-flat rings that slowly drift pole to pole.
+ */
+function buildSphereWeaveChain(pathSeed, colorIdx, segmentIndex, radius, detail = 50, { thetaTurnsPerSegment, phiCyclesPerSegment }) {
+  const { stepsMin, stepsRange } = globeDetailParams(detail);
+  const rng = createRng((pathSeed + colorIdx * 4099) >>> 0);
+  const steps = stepsMin + Math.floor(rng() * stepsRange);
+  const phaseOffset = hash01(pathSeed, colorIdx * 131) * Math.PI * 2;
+  const phiPhase = hash01(pathSeed, colorIdx * 271 + 1) * Math.PI * 2;
+
+  /** @type {number[][]} */
+  const chain = [];
+  for (let i = 0; i <= steps; i++) {
+    const u = segmentIndex + i / steps;
+    const theta = phaseOffset + u * thetaTurnsPerSegment * Math.PI * 2;
+    const phi = Math.acos(Math.cos(phiPhase + u * phiCyclesPerSegment * Math.PI * 2));
+    chain.push(sphericalToCart(theta, phi, radius));
+  }
+  return chain;
+}
+
+/**
+ * Same weave course as buildSphereWeaveChain's spiral-wrap params, but each waypoint is
+ * nudged by layered smooth wobble and the result is Catmull-Rom smoothed — bends and
+ * drifts like a river within its banks instead of tracing a perfect helix.
+ */
+function buildRiverMeanderChain(pathSeed, colorIdx, segmentIndex, radius, detail = 50) {
+  const { stepsMin, stepsRange } = globeDetailParams(detail);
+  const rng = createRng((pathSeed + colorIdx * 4099) >>> 0);
+  // Catmull-Rom subdivision expands each waypoint into ~8 points — keep the waypoint
+  // count low enough that the finished chain stays under the tube renderer's 140-point
+  // decimation cap (see buildCurvedZigzagChain for why that matters).
+  const waypointMin = Math.max(6, Math.round(stepsMin / 9));
+  const waypointRange = Math.max(4, Math.round(stepsRange / 9));
+  const steps = waypointMin + Math.floor(rng() * waypointRange);
+  const phaseOffset = hash01(pathSeed, colorIdx * 131) * Math.PI * 2;
+  const phiPhase = hash01(pathSeed, colorIdx * 271 + 1) * Math.PI * 2;
+  const wobbleSeed = colorIdx * 91.7 + hash01(pathSeed, colorIdx * 53) * 40;
+
+  /** @type {number[][]} */
+  const waypoints = [];
+  for (let i = 0; i <= steps; i++) {
+    const u = segmentIndex + i / steps;
+    const theta = phaseOffset + u * 0.55 * Math.PI * 2;
+    const basePhi = Math.acos(Math.cos(phiPhase + u * 0.16 * Math.PI * 2));
+    const wobbleTheta = Math.sin(u * 2.3 + wobbleSeed) * 0.16 + Math.sin(u * 0.8 + wobbleSeed * 1.7) * 0.1;
+    const wobblePhi = Math.sin(u * 1.9 + wobbleSeed * 0.6) * 0.09 + Math.sin(u * 0.6 + wobbleSeed * 2.1) * 0.05;
+    const phi = clamp(basePhi + wobblePhi, 0.04, Math.PI - 0.04);
+    waypoints.push(sphericalToCart(theta + wobbleTheta, phi, radius));
+  }
+  return catmullRomChain(waypoints, 8);
+}
+
+/** Uniform Catmull-Rom spline through waypoints — C1-continuous, no corner kinks. */
+function catmullRomChain(waypoints, subSteps) {
+  const n = waypoints.length;
+  if (n < 3) return waypoints;
+  const get = (i) => waypoints[clamp(i, 0, n - 1)];
+  /** @type {number[][]} */
+  const chain = [];
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = get(i - 1);
+    const p1 = get(i);
+    const p2 = get(i + 1);
+    const p3 = get(i + 2);
+    const steps = i === n - 2 ? subSteps + 1 : subSteps;
+    for (let s = 0; s < steps; s++) {
+      const t = s / subSteps;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const pt = [0, 0, 0];
+      for (let d = 0; d < 3; d++) {
+        pt[d] = 0.5 * (
+          (2 * p1[d]) +
+          (-p0[d] + p2[d]) * t +
+          (2 * p0[d] - 5 * p1[d] + 4 * p2[d] - p3[d]) * t2 +
+          (-p0[d] + 3 * p1[d] - 3 * p2[d] + p3[d]) * t3
+        );
+      }
+      chain.push(pt);
     }
   }
   return chain;
@@ -226,20 +396,36 @@ export function morphChainEmergence(chain, emergence, pathSeed, targetR, shapeId
     return chain.map(([x, y, z], i) => morphTorusPoint(x, y, z, blend, targetR, pathSeed, i));
   }
 
+  const isStructuredSphere = shape === 'sphereSpiralWrap' || shape === 'sphereLatitudeBands' || shape === 'sphereRiverMeander';
+  if (isStructuredSphere) {
+    // These build their points directly on the shell (see buildSphereWeaveChain /
+    // buildRiverMeanderChain) — growth comes from the curve extending over time, not
+    // from radius settling, so skip the wild/chaos radius blend entirely.
+    return chain.map(([x, y, z]) => {
+      const r = Math.hypot(x, y, z) || 1;
+      return [(x / r) * targetR, (y / r) * targetR, (z / r) * targetR];
+    });
+  }
+
   return chain.map(([x, y, z], i) => {
     const r = Math.hypot(x, y, z) || 1;
     const nx = x / r;
     const ny = y / r;
     const nz = z / r;
     const chaos = (hash01(pathSeed, i * 19) - 0.5) * 2 * chaosFade;
-    const wildR = targetR * (0.55 + hash01(pathSeed, i * 7) * 0.45 + chaos * 0.22);
+    const isSphereLike = shape === 'sphere' || shape === 'sphereCurvedZigzag';
+    // Sphere/curved-zigzag stay near the shell radius even before emergence blends in —
+    // the wide swing used by other shapes reads as radial spikes once drawn as thick tubes.
+    const wildR = isSphereLike
+      ? targetR * (0.92 + hash01(pathSeed, i * 7) * 0.16 + chaos * 0.06)
+      : targetR * (0.55 + hash01(pathSeed, i * 7) * 0.45 + chaos * 0.22);
     const [sx, sy, sz] = projectToShapeShell(nx, ny, nz, shape, targetR, pathSeed, i);
     const shellR = Math.hypot(sx, sy, sz);
     const shellNx = sx / shellR;
     const shellNy = sy / shellR;
     const shellNz = sz / shellR;
     const shellDist = shellR + chaos * targetR * 0.05 * chaosFade;
-    if (shape === 'sphere' && e >= 0.82) {
+    if (isSphereLike && e >= 0.82) {
       return [shellNx * targetR, shellNy * targetR, shellNz * targetR];
     }
     const R = wildR * (1 - blend) + shellDist * blend;

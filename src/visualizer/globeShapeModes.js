@@ -1,7 +1,11 @@
-/** @typedef {'sphere'|'ellipsoid'|'torus'|'blob'|'cube'} GlobeShapeMode */
+/** @typedef {'sphere'|'sphereCurvedZigzag'|'sphereSpiralWrap'|'sphereLatitudeBands'|'sphereRiverMeander'|'ellipsoid'|'torus'|'blob'|'cube'} GlobeShapeMode */
 
 export const GLOBE_SHAPE_MODES = [
   { id: 'sphere', label: 'Sphere' },
+  { id: 'sphereCurvedZigzag', label: 'Sphere (curved zigzag)' },
+  { id: 'sphereSpiralWrap', label: 'Sphere (spiral wrap)' },
+  { id: 'sphereLatitudeBands', label: 'Sphere (latitude bands)' },
+  { id: 'sphereRiverMeander', label: 'Sphere (river meander)' },
   { id: 'ellipsoid', label: 'Ellipsoid' },
   { id: 'torus', label: 'Torus ring' },
   { id: 'blob', label: 'Organic blob' },
