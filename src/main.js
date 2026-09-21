@@ -88,6 +88,44 @@ import {
 const BUNDLED_AUDIO_URL = '/samples/the-blue-monk.mp3';
 const BUNDLED_AUDIO_NAME = '09 TheBlueMonk.mp3';
 
+function setupUiToggles() {
+  const root = document.documentElement;
+  const modeBtn = document.getElementById('ui-mode-toggle-btn');
+  const modeLabel = document.getElementById('ui-mode-toggle-label');
+  const themeBtn = document.getElementById('theme-toggle-btn');
+  const themeIcon = document.getElementById('theme-toggle-icon');
+
+  function syncModeUi() {
+    const mode = root.getAttribute('data-ui-mode') || 'redesign';
+    if (modeLabel) modeLabel.textContent = mode === 'classic' ? 'Classic UI' : 'New UI';
+    if (modeBtn) modeBtn.title = mode === 'classic' ? 'Switch to the redesigned UI' : 'Switch to the classic UI';
+  }
+
+  function syncThemeUi() {
+    const theme = root.getAttribute('data-theme') || 'dark';
+    if (themeIcon) themeIcon.textContent = theme === 'light' ? '☀' : '☽';
+    if (themeBtn) themeBtn.setAttribute('aria-pressed', String(theme === 'light'));
+  }
+
+  modeBtn?.addEventListener('click', () => {
+    const next = (root.getAttribute('data-ui-mode') || 'redesign') === 'classic' ? 'redesign' : 'classic';
+    root.setAttribute('data-ui-mode', next);
+    try { localStorage.setItem('ui-mode', next); } catch { /* storage unavailable */ }
+    syncModeUi();
+  });
+
+  themeBtn?.addEventListener('click', () => {
+    const next = (root.getAttribute('data-theme') || 'dark') === 'light' ? 'dark' : 'light';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('ui-theme', next); } catch { /* storage unavailable */ }
+    syncThemeUi();
+  });
+
+  syncModeUi();
+  syncThemeUi();
+}
+setupUiToggles();
+
 const fileInput = document.getElementById('file-input');
 const dropzone = document.getElementById('dropzone');
 const loadSampleBtn = document.getElementById('load-sample-btn');
@@ -1047,7 +1085,7 @@ function setupCollapsiblePanels() {
     audioSourcesSectionToggle,
     audioSourcesSectionBody,
     SONG_ANALYSIS_PANEL_OPEN_KEY,
-    { defaultCollapsed: true, onChange: syncStudioLayout },
+    { defaultCollapsed: false, onChange: syncStudioLayout },
   );
   syncStudioLayout();
 }
@@ -1072,7 +1110,9 @@ function loadCinematicPanelCollapsed() {
 }
 
 function syncStudioLayout() {
-  const visible = [cinematicSection, mappingSection, audioSourcesSection].filter((s) => s && !s.hidden);
+  // audioSourcesSection now lives in the preview column, not the right rail —
+  // its expand state no longer affects how wide the right rail needs to be.
+  const visible = [cinematicSection, mappingSection].filter((s) => s && !s.hidden);
   const anyExpanded = visible.some((s) => !isCollapsiblePanelCollapsed(s));
   document.body.classList.toggle('panel-right-expanded', anyExpanded);
 }

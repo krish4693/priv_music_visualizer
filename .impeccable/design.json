@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-21T17:55:46Z",
+  "title": "Design System: Music Parameter Visualizer",
+  "extensions": {
+    "colorMeta": {
+      "void-bg": { "role": "neutral", "displayName": "Void", "canonical": "oklch(11% 0.02 290)", "tonalRamp": ["#05050a", "#0a0a12", "#12121f", "#1c1c2e", "#2a2a40", "#4a4a68", "#7878a0", "#a8a8c8"] },
+      "surface": { "role": "neutral", "displayName": "Surface", "canonical": "oklch(15% 0.025 290)", "tonalRamp": ["#08080e", "#0e0e18", "#12121f", "#1a1a2c", "#28283e", "#484868", "#78789c", "#a8a8c8"] },
+      "border": { "role": "neutral", "displayName": "Hairline", "canonical": "oklch(28% 0.04 285)", "tonalRamp": ["#101018", "#1a1a28", "#2a2a40", "#3c3c58", "#565680", "#7878a0", "#a0a0c0", "#c8c8e0"] },
+      "text-primary": { "role": "neutral", "displayName": "Ink", "canonical": "oklch(92% 0.01 290)", "tonalRamp": ["#28283a", "#484860", "#78789a", "#a8a8c0", "#c8c8d8", "#e0e0e8", "#e8e8f0", "#f4f4f8"] },
+      "text-muted": { "role": "neutral", "displayName": "Fog", "canonical": "oklch(60% 0.03 290)", "tonalRamp": ["#38384a", "#4c4c62", "#62627c", "#8888a8", "#a0a0bc", "#b8b8d0", "#d0d0e0", "#e8e8f0"] },
+      "accent-violet": { "role": "primary", "displayName": "Default Violet", "canonical": "oklch(62% 0.23 290)", "tonalRamp": ["#2a1a5c", "#3f2a86", "#5840b8", "#7c5cff", "#9478ff", "#a78bfa", "#c0aefc", "#dcd0fd"] },
+      "accent-violet-glow": { "role": "primary", "displayName": "Violet Glow", "canonical": "oklch(72% 0.17 290)", "tonalRamp": ["#5840b8", "#7c5cff", "#8f70ff", "#a78bfa", "#b89ffb", "#c8b4fc", "#dcd0fd", "#f0eafe"] },
+      "band-bass": { "role": "tertiary", "displayName": "Bass Red", "canonical": "oklch(64% 0.21 15)", "tonalRamp": ["#5c1428", "#8c1e3c", "#c22e54", "#ff4d6d", "#ff6f89", "#ff92a6", "#ffb6c4", "#ffdbe2"] },
+      "band-mid": { "role": "tertiary", "displayName": "Mid Violet (collides with Primary)", "canonical": "oklch(62% 0.23 290)", "tonalRamp": ["#2a1a5c", "#3f2a86", "#5840b8", "#7c5cff", "#9478ff", "#a78bfa", "#c0aefc", "#dcd0fd"] },
+      "band-high": { "role": "tertiary", "displayName": "High Cyan", "canonical": "oklch(78% 0.12 220)", "tonalRamp": ["#0e4a5c", "#146e88", "#1c96b8", "#4dd4ff", "#72dfff", "#98e8ff", "#c0f0ff", "#e6faff"] }
+    },
+    "typographyMeta": {
+      "body": { "displayName": "Body (unstyled system-ui)", "purpose": "Default for control labels and most readouts; also doubles as headings due to lack of a display role." },
+      "label": { "displayName": "Label (unstyled system-ui)", "purpose": "Small caption text on toggles/chips; visually near-identical to Body aside from size." }
+    },
+    "shadows": [
+      { "name": "modal-drop", "value": "0 4px 20px rgba(0, 0, 0, 0.45)", "purpose": "The one shadow in the codebase; applied to a single modal-like panel, not part of a system." }
+    ],
+    "motion": [],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Default action button — violet fill, used for primary actions throughout.",
+      "html": "<button class=\"ds-btn-primary\">Export MP4</button>",
+      "css": ".ds-btn-primary { background: #7c5cff; color: #e8e8f0; padding: 8px 16px; border-radius: 6px; border: none; font: 500 0.8rem system-ui, sans-serif; transition: background 0.15s ease; } .ds-btn-primary:hover { background: #a78bfa; } .ds-btn-primary:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "The single container shape reused for every grouping — settings blocks, meters, modals alike.",
+      "html": "<div class=\"ds-panel\"><span class=\"ds-panel-label\">Active audio</span></div>",
+      "css": ".ds-panel { background: #12121f; border: 1px solid #2a2a40; border-radius: 8px; padding: 16px; } .ds-panel-label { color: #8888a8; font: 500 0.68rem system-ui, sans-serif; }"
+    },
+    {
+      "name": "Frequency Meter Row",
+      "kind": "custom",
+      "refersTo": "meter-row",
+      "description": "Live bass/mid/high readout — currently styled as plain labeled bars with no distinct treatment from static UI text.",
+      "html": "<div class=\"ds-meter-row\"><span class=\"ds-meter-label\">Bass</span><div class=\"ds-meter-track\"><div class=\"ds-meter-fill\" style=\"width:42%;background:#ff4d6d\"></div></div></div>",
+      "css": ".ds-meter-row { display: flex; align-items: center; gap: 8px; } .ds-meter-label { color: #8888a8; font: 400 0.72rem system-ui, sans-serif; width: 3rem; } .ds-meter-track { flex: 1; height: 6px; background: #1a1a2c; border-radius: 3px; overflow: hidden; } .ds-meter-fill { height: 100%; border-radius: 3px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Default Violet",
+    "overview": "This document captures the UI exactly as it stands today, before the redesign: a dark canvas at #0a0a12, one violet accent (#7c5cff) reused for buttons, active states, and the mid-frequency indicator alike, system-ui for every label and readout, and border-radius applied almost uniformly at 4-8px regardless of what the element is. It is functional and legible, and it is also indistinguishable from any other AI-scaffolded dark-mode SaaS panel.",
+    "keyCharacteristics": [
+      "Single accent hue (#7c5cff violet) carries buttons, focus states, and one of three frequency-band colors — no role separation.",
+      "system-ui font stack throughout; no display/body pairing, no typographic hierarchy beyond size bumps.",
+      "Border-radius applied near-uniformly (4-8px) to nearly every container, regardless of function.",
+      "Flat by default; exactly one shadow in the entire stylesheet, functioning as an outlier rather than a system."
+    ],
+    "rules": [
+      { "name": "The One Violet Rule (unintentional)", "body": "Every interactive and semantic color need is currently served by the same #7c5cff or a lightness variant of it. Not a deliberate restraint strategy — reads as under-resourced.", "section": "colors" },
+      { "name": "The No-Pairing Problem", "body": "There is currently no display/body typographic contrast at all — a single unstyled system font stack fills every role from section headers to millisecond timecodes.", "section": "typography" },
+      { "name": "The Accidental-Flat Rule (current state)", "body": "The system is flat because no elevation system was built, not because flatness was chosen as a strategy.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do give live technical readouts (levels, percentages, timecodes) their own typographic treatment instead of reusing default body style.",
+      "Do vary component treatment by function — a meter, a destructive export action, and a settings toggle group shouldn't resolve to the same bordered box.",
+      "Do reference pro audio/video tool density (Ableton, Resolume, TouchDesigner) for legible control-surface density."
+    ],
+    "donts": [
+      "Don't carry forward the generic AI-SaaS-dashboard look: single reused violet accent, uniform rounded corners everywhere, system-ui for every text role, undifferentiated bordered-panel repetition.",
+      "Don't let the frequency-band colors share a hue with the UI's own interactive accent.",
+      "Don't apply the same border-radius to a settings panel, a button, and a modal indiscriminately."
+    ]
+  }
+}

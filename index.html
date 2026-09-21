@@ -6,11 +6,35 @@
     <title>Music Parameter Visualizer</title>
     <link rel="preload" href="/samples/the-blue-monk.mp3" as="fetch" crossorigin="anonymous" />
     <link rel="stylesheet" href="/src/style.css" />
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem('ui-mode') || 'redesign';
+          var theme = localStorage.getItem('ui-theme');
+          if (!theme) {
+            theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          }
+          document.documentElement.setAttribute('data-ui-mode', mode);
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          document.documentElement.setAttribute('data-ui-mode', 'redesign');
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div class="app">
       <header class="app-header">
         <h1>Music Parameter Visualizer</h1>
+        <div class="header-toggles">
+          <button type="button" class="ui-toggle-btn" id="ui-mode-toggle-btn" title="Switch between the classic and redesigned UI">
+            <span id="ui-mode-toggle-label">New UI</span>
+          </button>
+          <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Switch between dark and light theme" aria-label="Toggle light/dark theme">
+            <span id="theme-toggle-icon" aria-hidden="true">&#9789;</span>
+          </button>
+        </div>
         <button type="button" class="help-open-btn" id="help-open-btn" aria-expanded="false" aria-controls="help-dialog">Help</button>
       </header>
 
@@ -440,6 +464,24 @@
               <span id="time-display">0:00 / 0:00</span>
             </div>
             <p class="take-note">Record while playing · save everything with <strong>Save config</strong></p>
+            <section class="audio-sources-section panel-inner collapsible-section" id="audio-sources-section">
+              <button
+                type="button"
+                class="collapsible-section-toggle audio-sources-header"
+                id="audio-sources-section-toggle"
+                aria-expanded="true"
+                aria-controls="audio-sources-section-body"
+              >
+                <span class="collapsible-section-toggle-text">
+                  <span class="audio-sources-title">Song analysis (live)</span>
+                  <span class="mapping-hint">Real-time levels from the audio</span>
+                </span>
+                <span class="collapsible-chevron" aria-hidden="true"></span>
+              </button>
+              <div class="collapsible-section-body" id="audio-sources-section-body">
+                <ul class="audio-sources-list" id="audio-sources-list"></ul>
+              </div>
+            </section>
           </section>
         </main>
 
@@ -508,24 +550,6 @@
               </table>
             </div>
             <button type="button" class="mapping-reset" id="mapping-reset">Reset mapping</button>
-            </div>
-          </section>
-          <section class="audio-sources-section panel-inner collapsible-section is-collapsed" id="audio-sources-section">
-            <button
-              type="button"
-              class="collapsible-section-toggle audio-sources-header"
-              id="audio-sources-section-toggle"
-              aria-expanded="false"
-              aria-controls="audio-sources-section-body"
-            >
-              <span class="collapsible-section-toggle-text">
-                <span class="audio-sources-title">Song analysis (live)</span>
-                <span class="mapping-hint">Real-time levels from the audio</span>
-              </span>
-              <span class="collapsible-chevron" aria-hidden="true"></span>
-            </button>
-            <div class="collapsible-section-body" id="audio-sources-section-body" hidden>
-              <ul class="audio-sources-list" id="audio-sources-list"></ul>
             </div>
           </section>
         </aside>
