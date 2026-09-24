@@ -10,6 +10,7 @@ export const CONTROL_REGISTRY = [
   { id: 'globe-shape-select', label: 'Globe shape', group: 'Scene', type: 'variation', key: 'globeShapeMode', when: 'Globe concept' },
   { id: 'globe-detail-slider', label: 'Globe detail', group: 'Scene', type: 'variation', key: 'globeDetail', when: 'Globe concept' },
   { id: 'globe-tube-profile-select', label: 'Line profile', group: 'Scene', type: 'variation', key: 'globeTubeProfile', when: 'Globe concept' },
+  { id: 'globe-joint-style-select', label: 'Corner joints', group: 'Scene', type: 'variation', key: 'globeJointStyle', when: 'Globe concept' },
   { id: 'file-input', label: 'Audio upload', group: 'Session', type: 'action' },
   { id: 'save-config-btn', label: 'Save config', group: 'Session', type: 'action' },
   { id: 'open-config-btn', label: 'Open config', group: 'Session', type: 'action' },

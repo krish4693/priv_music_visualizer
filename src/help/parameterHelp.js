@@ -11,6 +11,7 @@ export const HELP_SECTIONS = [
       { name: 'Globe shape', desc: 'Shape of each Globe blob (sphere, torus, cube…).', when: 'Living Song · Globe only' },
       { name: 'Detail', desc: 'Line/tube density on each Globe blob. Higher = busier lines.', when: 'Globe only' },
       { name: 'Line profile', desc: 'Round or square tubes on Globe.', when: 'Globe only' },
+      { name: 'Corner joints', desc: 'How Globe tube corners are sealed — round, square (matches Line profile), or off (visible gaps).', when: 'Globe only' },
       { name: 'Shape types', desc: 'Which 3D shapes can appear (cube, oval, pillar…).', when: 'Geometric concept only' },
     ],
   },

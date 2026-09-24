@@ -2,6 +2,7 @@ import { projectPoint, rotateEuler } from '../math3d.js';
 import { normalizeGlobeShapeMode } from '../globeShapeModes.js';
 import { globeDetailParams, normalizeGlobeDetail } from '../globeDetail.js';
 import { normalizeGlobeTubeProfile } from '../globeTubeProfile.js';
+import { normalizeGlobeJointStyle } from '../globeJointStyle.js';
 import {
   livingSongGlobePaths,
   livingSongGlobeThreadProgress,
@@ -200,6 +201,65 @@ function squareSegmentFaces(a, b, radiusA, radiusB) {
 function profileSegmentFaces(a, b, radiusA, radiusB, tubeSides, profile) {
   if (profile === 'square') return squareSegmentFaces(a, b, radiusA, radiusB);
   return tubeSegmentFaces(a, b, radiusA, radiusB, tubeSides);
+}
+
+/**
+ * Small sphere dropped at each interior joint vertex. `segmentFrame` computes an
+ * independent orientation per segment (based only on that segment's own direction),
+ * so two segments meeting at a corner get differently-rotated rings at their shared
+ * point — the tube surfaces don't line up there, leaving a visible notch on the
+ * outside of the bend. A joint sphere plugs that gap without needing a continuous
+ * frame propagated across the whole chain (which would still leave a real geometric
+ * gap at sharp turns regardless of twist).
+ */
+function jointSphereFaces(center, radius, sides, poleAxis) {
+  // Build the sphere's own local frame around the joint's bisector direction
+  // (same technique as segmentFrame) instead of a fixed world Y-up pole — a
+  // world-aligned sphere's pinch poles and facet seams land at a random angle
+  // relative to whichever way the tube actually travels, which is what reads
+  // as "skewed" against the tube's own facet grain.
+  const pole = poleAxis && (poleAxis[0] || poleAxis[1] || poleAxis[2]) ? normalize3(poleAxis) : [0, 1, 0];
+  let up = [0, 1, 0];
+  if (Math.abs(pole[1]) > 0.95) up = [1, 0, 0];
+  const eqA = normalize3(cross(pole, up));
+  const eqB = normalize3(cross(eqA, pole));
+
+  const lonSteps = Math.max(6, Math.min(10, sides));
+  const latSteps = 4;
+  const faces = [];
+  for (let lat = 0; lat < latSteps; lat++) {
+    const phi0 = (lat / latSteps) * Math.PI;
+    const phi1 = ((lat + 1) / latSteps) * Math.PI;
+    for (let lon = 0; lon < lonSteps; lon++) {
+      const theta0 = (lon / lonSteps) * Math.PI * 2;
+      const theta1 = ((lon + 1) / lonSteps) * Math.PI * 2;
+      const pt = (phi, theta) => {
+        const sp = Math.sin(phi);
+        const local = add(scale(pole, Math.cos(phi)), add(scale(eqA, sp * Math.cos(theta)), scale(eqB, sp * Math.sin(theta))));
+        return { pos: add(center, scale(local, radius)), normal: local };
+      };
+      const p00 = pt(phi0, theta0);
+      const p01 = pt(phi0, theta1);
+      const p11 = pt(phi1, theta1);
+      const p10 = pt(phi1, theta0);
+      const mid = normalize3(add(add(p00.normal, p01.normal), add(p11.normal, p10.normal)));
+      faces.push({ verts: [p00.pos, p01.pos, p11.pos, p10.pos], normal: mid });
+    }
+  }
+  return faces;
+}
+
+/**
+ * Square-profile joint — a short square-cross-section plug oriented along the
+ * bisector of the incoming/outgoing directions, so it reads as a natural corner
+ * of the same faceted material instead of a round bead sitting on a flat tube.
+ */
+function jointBoxFaces(center, halfSize, tangentIn, tangentOut) {
+  const bisector = normalize3(add(tangentIn, tangentOut));
+  const axis = bisector[0] || bisector[1] || bisector[2] ? bisector : tangentIn;
+  const a = add(center, scale(axis, -halfSize));
+  const b = add(center, scale(axis, halfSize));
+  return squareSegmentFaces(a, b, halfSize, halfSize);
 }
 
 function projectFace(face, color, width, height, cameraZoom) {
@@ -423,6 +483,33 @@ function collectTubeDrawables(
     for (const face of profileSegmentFaces(lifted[i], lifted[i + 1], rA, rB, tubeSides, tubeProfile)) {
       const d = projectFace(face, color, width, height, cameraZoom);
       if (d) drawables.push(d);
+    }
+  }
+
+  const jointStyle = normalizeGlobeJointStyle(variation?.globeJointStyle);
+  if (jointStyle !== 'off') {
+    for (let i = 1; i < n - 1; i++) {
+      // Only near-straight joints get skipped (no visible gap there anyway) — keeps
+      // the extra joint geometry limited to actual corners instead of every point
+      // along smooth, finely-subdivided curves.
+      const tin = normalize3([lifted[i][0] - lifted[i - 1][0], lifted[i][1] - lifted[i - 1][1], lifted[i][2] - lifted[i - 1][2]]);
+      const tout = normalize3([lifted[i + 1][0] - lifted[i][0], lifted[i + 1][1] - lifted[i][1], lifted[i + 1][2] - lifted[i][2]]);
+      const straightness = tin[0] * tout[0] + tin[1] * tout[1] + tin[2] * tout[2];
+      if (straightness > 0.995) continue;
+
+      const ci = fixedColor ? colorIdx : (paletteLen > 1 ? mixedGlobeColorIdx(mixSeed, chainIdx, i, paletteLen) : colorIdx);
+      const color = livingSnakeColor(palette, ci, 0);
+      const jointRadius = baseRadius * (0.78 + 0.22 * (i / Math.max(1, n - 2)));
+      // Slightly oversized so it fully overlaps both tube ends instead of just
+      // touching them — a joint sized to exactly match the tube radius still
+      // leaves a hairline seam where the round/flat surfaces meet.
+      const faces = jointStyle === 'box'
+        ? jointBoxFaces(lifted[i], jointRadius * 1.06, tin, tout)
+        : jointSphereFaces(lifted[i], jointRadius * 1.12, tubeSides, add(tin, tout));
+      for (const face of faces) {
+        const d = projectFace(face, color, width, height, cameraZoom);
+        if (d) drawables.push(d);
+      }
     }
   }
   return drawables;

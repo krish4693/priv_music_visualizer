@@ -6,6 +6,7 @@ import { normalizeLiquidSourceMode } from './liquidSourceModes.js';
 import { normalizeGlobeShapeMode } from './globeShapeModes.js';
 import { normalizeGlobeDetail } from './globeDetail.js';
 import { normalizeGlobeTubeProfile } from './globeTubeProfile.js';
+import { normalizeGlobeJointStyle } from './globeJointStyle.js';
 import { normalizeElementSizePercent } from './elementMotion.js';
 
 export { SHAPE_OPTIONS };
@@ -60,6 +61,7 @@ export const COLOR_MODES = [
  * @property {number} globeDetail
  * @property {boolean} [globeDenseProof]
  * @property {import('./globeTubeProfile.js').GlobeTubeProfile} globeTubeProfile
+ * @property {import('./globeJointStyle.js').GlobeJointStyle} globeJointStyle
  * @property {number} liquidFlowSpeed
  * @property {number} liquidThickness
  * @property {number} liquidRelief
@@ -107,6 +109,7 @@ export const DEFAULT_VARIATION = {
   globeShapeMode: 'sphere',
   globeDetail: 50,
   globeTubeProfile: 'round',
+  globeJointStyle: 'sphere',
   livingElementCount: 6,
   elementMotion: 50,
   elementTurn: 50,
@@ -167,6 +170,7 @@ export function cloneVariation(v) {
     globeDetail: normalizeGlobeDetail(v.globeDetail),
     globeDenseProof: !!v.globeDenseProof,
     globeTubeProfile: normalizeGlobeTubeProfile(v.globeTubeProfile),
+    globeJointStyle: normalizeGlobeJointStyle(v.globeJointStyle),
     livingElementCount: v.livingElementCount == null ? null : clamp(Math.round(Number(v.livingElementCount)), 1, 28),
     elementMotion: clamp(Number(v.elementMotion) ?? DEFAULT_VARIATION.elementMotion, 0, 100),
     elementTurn: clamp(Number(v.elementTurn) ?? DEFAULT_VARIATION.elementTurn, 0, 100),
@@ -228,6 +232,7 @@ export function loadVariation() {
       globeDetail: normalizeGlobeDetail(parsed.globeDetail),
       globeDenseProof: !!parsed.globeDenseProof,
       globeTubeProfile: normalizeGlobeTubeProfile(parsed.globeTubeProfile),
+      globeJointStyle: normalizeGlobeJointStyle(parsed.globeJointStyle),
       livingElementCount: parsed.livingElementCount == null
         ? null
         : clamp(Math.round(Number(parsed.livingElementCount)), 1, 28),

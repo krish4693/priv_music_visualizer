@@ -68,6 +68,7 @@ import { VISUAL_CONCEPTS, isGeometricConcept, isLavaConcept, isLivingSongConcept
 import { livingSongVisualTimeAt, LIVING_SONG_HOLD_SECONDS } from './visualizer/concepts/visualLivingSongConcept.js';
 import { GLOBE_SHAPE_MODES } from './visualizer/globeShapeModes.js';
 import { GLOBE_TUBE_PROFILES } from './visualizer/globeTubeProfile.js';
+import { GLOBE_JOINT_STYLES } from './visualizer/globeJointStyle.js';
 import { AutomationRecorder } from './visualizer/automationStore.js';
 import { buildAppConfig, downloadAppConfig, parseAppConfig, suggestConfigFilename } from './visualizer/configStore.js';
 import { loadBackgroundColor, saveBackgroundColor } from './visualizer/backgroundStore.js';
@@ -227,6 +228,7 @@ const globeShapeSelect = document.getElementById('globe-shape-select');
 const globeDetailSlider = document.getElementById('globe-detail-slider');
 const globeDetailVal = document.getElementById('globe-detail-val');
 const globeTubeProfileSelect = document.getElementById('globe-tube-profile-select');
+const globeJointStyleSelect = document.getElementById('globe-joint-style-select');
 const livingSongControlsGroup = document.getElementById('living-song-controls-group');
 const elementMotionSlider = document.getElementById('element-motion-slider');
 const elementMotionVal = document.getElementById('element-motion-val');
@@ -1576,6 +1578,12 @@ function setupVariationPanel() {
         `<option value="${id}"${(variation.globeTubeProfile ?? 'round') === id ? ' selected' : ''}>${label}</option>`,
       ).join('');
     }
+
+    if (globeJointStyleSelect) {
+      globeJointStyleSelect.innerHTML = GLOBE_JOINT_STYLES.map(({ id, label }) =>
+        `<option value="${id}"${(variation.globeJointStyle ?? 'sphere') === id ? ' selected' : ''}>${label}</option>`,
+      ).join('');
+    }
   }
 
   function renderLiquidControls() {
@@ -1797,6 +1805,11 @@ function setupVariationPanel() {
 
   globeTubeProfileSelect?.addEventListener('change', () => {
     variation.globeTubeProfile = globeTubeProfileSelect.value;
+    applyVariation(false);
+  });
+
+  globeJointStyleSelect?.addEventListener('change', () => {
+    variation.globeJointStyle = globeJointStyleSelect.value;
     applyVariation(false);
   });
 
