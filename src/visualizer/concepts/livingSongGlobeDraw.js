@@ -474,7 +474,7 @@ function collectTubeDrawables(
   const n = lifted.length;
 
   for (let i = 0; i < n - 1; i++) {
-    const ci = fixedColor ? colorIdx : (paletteLen > 1 ? mixedGlobeColorIdx(mixSeed, chainIdx, i, paletteLen) : colorIdx);
+    const ci = colorIdx;
     const color = livingSnakeColor(palette, ci, 0);
     const pathT = i / Math.max(1, n - 2);
     const taper = 0.78 + 0.22 * pathT;
@@ -497,7 +497,7 @@ function collectTubeDrawables(
       const straightness = tin[0] * tout[0] + tin[1] * tout[1] + tin[2] * tout[2];
       if (straightness > 0.995) continue;
 
-      const ci = fixedColor ? colorIdx : (paletteLen > 1 ? mixedGlobeColorIdx(mixSeed, chainIdx, i, paletteLen) : colorIdx);
+      const ci = colorIdx;
       const color = livingSnakeColor(palette, ci, 0);
       const jointRadius = baseRadius * (0.78 + 0.22 * (i / Math.max(1, n - 2)));
       // Slightly oversized so it fully overlaps both tube ends instead of just

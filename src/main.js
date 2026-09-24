@@ -1637,6 +1637,12 @@ function setupVariationPanel() {
   renderVisualConceptSelect();
   visualConceptSelect?.addEventListener('change', () => {
     variation.visualConcept = visualConceptSelect.value;
+    if (variation.visualConcept === 'visualLivingSongGlobe') {
+      variation.shapeCount = 1;
+      shapeCountSlider.value = '1';
+      if (shapeCountInput) shapeCountInput.value = '1';
+      if (shapeCountVal) shapeCountVal.textContent = '1';
+    }
     renderShapeToggles();
     renderLiquidControls();
     renderGlobeControls();
